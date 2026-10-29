@@ -1,0 +1,15 @@
+# Secrets & PII — never commit
+config.json
+congregations.csv
+sessions.json
+*.bak-*
+*.pyc
+__pycache__/
+
+# Logs & captures
+*.log
+*.png
+*.jpg
+
+# Local helpers with machine-specific state
+zoom_click.py

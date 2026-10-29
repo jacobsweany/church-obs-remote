@@ -1,0 +1,3 @@
+name,email,confno,dow,time,scene
+Ward A,ward-a@example.com,12345678901,0,09:00,Podium+Chorister
+Ward B,ward-b@example.com,23456789012,0,11:30,Podium+Chorister

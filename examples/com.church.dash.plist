@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent template for Church OBS Remote.
+  1. Replace every /Users/YOURNAME with your real home directory.
+  2. Save as  ~/Library/LaunchAgents/com.church.dash.plist
+  3. Run:  launchctl load  ~/Library/LaunchAgents/com.church.dash.plist
+     (or:  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.church.dash.plist)
+  Note: the Python.app path below is the Xcode Command Line Tools interpreter;
+  use your own python3 if different. TCC Screen Recording permission, if used,
+  must be granted to that exact Python.app binary.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.church.dash</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python</string>
+    <string>/Users/YOURNAME/church/church_dash.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/YOURNAME/church</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/YOURNAME</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>15</integer>
+  <key>StandardOutPath</key><string>/Users/YOURNAME/church/dash-stdout.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOURNAME/church/dash-stderr.log</string>
+</dict>
+</plist>

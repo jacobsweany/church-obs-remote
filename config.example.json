@@ -1,0 +1,57 @@
+{
+  "port": 8080,
+  "token": "CHANGE_ME_admin_token_secrets_token_hex_24",
+  "camera": {
+    "host": "192.168.1.50",
+    "port": 80,
+    "user": "admin",
+    "pass": "CHANGE_ME_camera_password"
+  },
+  "obs": {
+    "host": "127.0.0.1",
+    "port": 4455,
+    "pass": "CHANGE_ME_obs_websocket_password",
+    "ssl": false
+  },
+  "zoom": {
+    "confno": "12345678901"
+  },
+  "service": {
+    "start_preset": "Podium+Chorister",
+    "start_scene": "Podium",
+    "park_preset": "Home",
+    "stop_obs": true
+  },
+  "meetings": [
+    {
+      "id": "sun-morning",
+      "name": "Sunday Morning",
+      "zoom_account": "ward-a",
+      "confno": "12345678901",
+      "weekly": { "dow": 0, "time": "09:00" },
+      "scene": "Podium+Chorister"
+    }
+  ],
+  "tokens": {
+    "ward-a": {
+      "token": "CHANGE_ME_secrets_token_hex_24",
+      "profile": "ward-a@example.com",
+      "name": "Ward A"
+    },
+    "ward-b": {
+      "token": "CHANGE_ME_secrets_token_hex_24",
+      "profile": "ward-b@example.com",
+      "name": "Ward B"
+    },
+    "stake": {
+      "token": "CHANGE_ME_secrets_token_hex_24",
+      "profile": "stake@example.com",
+      "name": "Stake"
+    },
+    "admin": {
+      "token": "CHANGE_ME_secrets_token_hex_24",
+      "admin": true,
+      "name": "Admin"
+    }
+  }
+}
