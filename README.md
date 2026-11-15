@@ -15,7 +15,7 @@ and per-account tokens so several people can share the console.
 | **Camera** | PTZOptics HTTP API: pan/tilt/zoom, named presets, home position, and a **live preview stream** (frame pacing tuned for low latency) |
 | **OBS** | OBS-WebSocket v5: scene switching (in the order OBS displays them), virtual camera on/off |
 | **Zoom** | Join a conference by ID, scripted sign-in (email + password, screen-agnostic — works on both the email-entry and cached-account card UIs), a consolidated **Leave** (ends the meeting, signs out, closes the client), a live **in-meeting indicator with participant count** (updates within one refresh of join/leave), and a **participant name list** (📋 Names modal: exact names from the Accessibility tree, Vision-OCR fallback) |
-| **Accounts** | Per-congregation Bearer tokens; admin sees everything (session activity, credential management, presets); regular accounts see a scoped console |
+| **Accounts** | Per-congregation Bearer tokens; admin sees everything (session activity, credential management, presets); regular accounts see a scoped console; optional **read-only token** that can only view the Zoom meeting status, participant count, and names |
 | **Console** | Live "who's active" status for all connected accounts, visit counts and last-seen info (admin), per-account Zoom account binding; session counters **reset daily at local midnight** |
 
 ## Architecture
@@ -72,7 +72,9 @@ examples/com.church.dash.plist   launchd agent template (run at boot, keep alive
    - `zoom.confno` — default conference ID used by the Join button.
    - `meetings` — optional weekly schedule table shown on the console.
    - `tokens` — one entry per account. Give the admin entry
-     `"admin": true`. Generate tokens with:
+     `"admin": true`; give a read-only token `"zoom_ro": true` (it may then
+     only call `/api/state` and `/api/zoom/participants` — a
+     "who's in the meeting" view: status, count, names). Generate tokens with:
      `python3 -c "import secrets; print(secrets.token_hex(24))"`.
    - Zoom account passwords are stored in the **macOS Keychain** (per account),
      not in `config.json`.
@@ -97,6 +99,9 @@ examples/com.church.dash.plist   launchd agent template (run at boot, keep alive
   *other accounts are active*, not which device/browser).
 - Admin: session activity (active/last-seen, visits, browser/OS), Zoom
   credential setup, camera preset save, full console.
+- Read-only tokens (`"zoom_ro": true`): may only call `/api/state` (restricted
+  to Zoom meeting status/count) and `/api/zoom/participants` — a dedicated
+  "who's in the meeting" view. No controls, no other endpoints, no PII.
 - `config.json`, `congregations.csv`, and `sessions.json` are **secrets/PII** —
   they are git-ignored and must never be committed. Zoom credentials live in
   the macOS Keychain.

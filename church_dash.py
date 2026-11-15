@@ -2068,6 +2068,7 @@ label.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var
 #gate{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9}
 #gate .card{width:min(400px,92vw)}
 .hidden{display:none!important}
+body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important}
 .attmodal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:flex;align-items:center;justify-content:center;padding:18px}
 .attbox{background:#12161d;border:1px solid var(--line);border-radius:14px;min-width:280px;max-width:420px;width:100%;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .attbox .hd{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--line)}
@@ -2092,6 +2093,16 @@ label.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var
     <span class="dot" id="dZoom"></span><span>Zoom</span>
   </span></h1>
 <div id="updAge" class="mut" style="font-size:11px;height:1.5em;line-height:1.5em;margin-top:1px"></div>
+<div id="roWrap" class="hidden">
+  <div class="card" style="margin-top:10px">
+    <div style="font-size:17px;font-weight:700;margin-bottom:8px">Zoom Participants</div>
+    <div id="roStatus" style="font-size:15px;font-weight:600;color:var(--mut)">checking…</div>
+    <ul id="roList" class="attlist hidden" style="max-height:50vh;overflow-y:auto"></ul>
+    <div id="roTime" class="mut" style="margin-top:8px"></div>
+    <button class="btn" id="roRefresh" type="button">🔄 Refresh</button>
+    <button class="btn" id="roSignout" type="button" style="margin-top:8px">🚪 Sign out</button>
+  </div>
+</div>
 <div id="netBanner" class="hidden" style="background:#3a1715;border:1px solid #6e2a26;color:#ff9d94;border-radius:11px;padding:10px 14px;font-size:14px;font-weight:600;margin-bottom:12px" role="alert">⚠ Connection lost — retrying…</div>
 
 <div class="card">
@@ -2403,8 +2414,45 @@ async function loadAdmin(){
     }
   }catch(e){}
 }
+let roLastNames=0;
+async function fetchRONames(){
+  try{
+    const d=await api("/api/zoom/participants");
+    const ul=document.getElementById("roList"),ts=document.getElementById("roTime");
+    const ok=d&&(d.ok!==false)&&d.participants&&d.participants.length;
+    if(ok){
+      /* name escaped via esc() — same pattern as the participants modal (XSS-safe) */
+      ul.innerHTML=d.participants.map(p=>"<li>"+esc(p.name)+(p.host?' <span class="mut">(host)</span>':"")+"</li>").join("");
+      ul.classList.remove("hidden");
+      if(ts)ts.textContent="Updated "+new Date().toLocaleTimeString();
+      roLastNames=Date.now();
+    }else if(ts){ts.textContent="Names unavailable right now";}
+  }catch(e){const ts=document.getElementById("roTime");if(ts)ts.textContent="Names unavailable: "+String(e.message||e);}
+}
+function renderRO(s){
+  document.body.classList.add("ro");
+  document.getElementById("roWrap").classList.remove("hidden");
+  const el=document.getElementById("roStatus");
+  const z=s.zoom||{};
+  if(z.in_meeting===true){
+    el.textContent="● In meeting"+(z.count!=null?" · "+z.count+" in the meeting":"");
+    el.style.color="var(--ok)";
+    if(Date.now()-roLastNames>25000)fetchRONames();
+  }else{
+    el.textContent="No active Zoom meeting";
+    el.style.color="var(--mut)";
+    const ul=document.getElementById("roList");
+    if(ul){ul.innerHTML="";ul.classList.add("hidden");}
+    roLastNames=0;
+  }
+}
+document.getElementById("roRefresh").onclick=()=>{roLastNames=0;refresh();};
+document.getElementById("roSignout").onclick=()=>{try{localStorage.removeItem("ct");}catch(e){}location.reload();};
 function refresh(){
   api("/api/state").then(s=>{
+    if(s.zoom_ro){renderRO(s);return;}
+    document.body.classList.remove("ro");
+    document.getElementById("roWrap").classList.add("hidden");
     const sn=document.getElementById("scopeName");
     sn.textContent=s.profile_name?s.profile_name:(s.is_admin?"(admin)":"");
     const dO=document.getElementById("dObs"),dC=document.getElementById("dCam"),dZ=document.getElementById("dZoom");
@@ -2851,6 +2899,10 @@ class Handler(BaseHTTPRequestHandler):
         entry = _token_entry(self._auth_token())
         return bool(entry and entry.get("admin"))
 
+    def _is_zoom_ro(self):
+        entry = _token_entry(self._auth_token())
+        return bool(entry and entry.get("zoom_ro"))
+
     def _json(self, code, obj):
         body = json.dumps(obj).encode()
         self.send_response(code)
@@ -2886,6 +2938,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._auth_ok(path):
             self._json(401, {"error": "unauthorized"})
+            return
+        if self._is_zoom_ro() and path not in ("/api/state", "/api/zoom/participants"):
+            self._json(403, {"error": "read-only token: only /api/state and /api/zoom/participants are allowed"})
             return
         if path == "/api/obs/previewws":
             if not (OBS and OBS.connected):
@@ -2967,6 +3022,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, dict(_OP))
             return
         if path == "/api/state":
+            if self._is_zoom_ro():
+                try:
+                    att = _zoom_attendees_impl()
+                except Exception:
+                    att = {"ok": False, "in_meeting": False, "count": None}
+                self._json(200, {"zoom_ro": True, "is_admin": False,
+                                 "zoom": {"running": bool(zoom_running()),
+                                          "in_meeting": bool(att.get("in_meeting")),
+                                          "count": att.get("count")}})
+                return
             st = build_state()
             st["is_admin"] = self._is_admin()
             st["profile_id"] = self._profile_for()
@@ -3164,6 +3229,9 @@ return out
         path = urllib.parse.urlparse(self.path).path
         if not self._auth_ok(path):
             self._json(401, {"error": "unauthorized"})
+            return
+        if self._is_zoom_ro():
+            self._json(403, {"error": "read-only token: no POST actions allowed"})
             return
         b = self._body()
         try:

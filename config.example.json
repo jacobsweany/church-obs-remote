@@ -52,6 +52,11 @@
       "token": "CHANGE_ME_secrets_token_hex_24",
       "admin": true,
       "name": "Admin"
+    },
+    "zoom-ro": {
+      "token": "CHANGE_ME_secrets_token_urlsafe_16",
+      "name": "Zoom Read-Only",
+      "zoom_ro": true
     }
   }
 }
