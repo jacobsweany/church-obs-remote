@@ -2159,6 +2159,10 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
   <div class="mut" id="svcMsg">One-tap sequence: OBS up → Zoom joined (auto sign-in) → camera to start position.</div>
   <div id="profPick" style="display:none;margin-bottom:6px"><label class="lbl">Active congregation (admin)</label><div class="chips" id="profChips" style="margin-top:6px"></div></div>
   <div class="mut" id="schedLine" style="margin-bottom:8px;font-size:12px"></div>
+  <div id="schedToggle" style="display:none">
+    <button class="btn" id="schedToggleBtn" type="button" style="margin-top:0">…</button>
+    <div class="mut" style="font-size:11.5px;margin-top:5px">Halting stops the scheduled auto sign-in/join until midnight (or until you resume). Manual Join is unaffected.</div>
+  </div>
   <div class="row">
     <button class="btn big green" id="svcStart">▶ Start Service</button>
     <button class="btn big red" id="svcStop">■ Stop Service</button>
@@ -2448,6 +2452,41 @@ function renderRO(s){
 }
 document.getElementById("roRefresh").onclick=()=>{roLastNames=0;refresh();};
 document.getElementById("roSignout").onclick=()=>{try{localStorage.removeItem("ct");}catch(e){}location.reload();};
+(function(){
+  const box=document.getElementById("schedToggle"),btn=document.getElementById("schedToggleBtn");
+  if(!box||!btn)return;
+  let blocked=null;
+  function label(b,fd){
+    return b?("Resume auto-join \u2014 halted until "+(fd||"midnight"))
+            :"\u23f8\ufe0f Halt auto-join until midnight";
+  }
+  async function render(){
+    if(btn.disabled)return;
+    try{
+      const d=await api("/api/scheduler");
+      blocked=!!d.autojoin_blocked;
+      box.style.display="";
+      btn.textContent=label(blocked,d.flag_date);
+      btn.classList.toggle("green",!blocked);
+      btn.classList.toggle("red",blocked);
+    }catch(e){/* non-admin or transient: keep last state */}
+  }
+  btn.onclick=async()=>{
+    if(blocked===null||btn.disabled)return;
+    btn.disabled=true;
+    const next=!blocked;
+    try{
+      const d=await api("/api/scheduler",{blocked:next},"POST");
+      blocked=!!d.autojoin_blocked;
+      btn.textContent=label(blocked,d.flag_date);
+      btn.classList.toggle("green",!blocked);
+      btn.classList.toggle("red",blocked);
+    }catch(e){res("svcResult",false,String(e.message||e));}
+    btn.disabled=false;
+  };
+  render();
+  setInterval(render,10000);
+})();
 function refresh(){
   api("/api/state").then(s=>{
     if(s.zoom_ro){renderRO(s);return;}
@@ -3021,6 +3060,13 @@ class Handler(BaseHTTPRequestHandler):
             with _OP_LOCK:
                 self._json(200, dict(_OP))
             return
+        if path == "/api/scheduler":
+            if not self._is_admin():
+                self._json(403, {"error": "admin token required"})
+                return
+            blocked, until = _autojoin_blocked()
+            self._json(200, {"autojoin_blocked": bool(blocked), "flag_date": until or ""})
+            return
         if path == "/api/state":
             if self._is_zoom_ro():
                 try:
@@ -3235,6 +3281,13 @@ return out
             return
         b = self._body()
         try:
+            if path == "/api/scheduler":
+                if not self._is_admin():
+                    self._json(403, {"error": "admin token required"})
+                    return
+                r = _set_autojoin_blocked(bool(b.get("blocked")))
+                self._json(200 if r.get("ok") else 500, r)
+                return
             if path == "/api/debug/osa":
                 if not self._is_admin():
                     self._json(403, {"error": "admin token required"})
@@ -3473,6 +3526,41 @@ def _install_reloader():
 
 # ------------------------------------------------- auto-join scheduler -------
 _SCHED = {"events": []}
+NO_AUTOJOIN_FLAG = os.path.join(HOME, "no_autojoin")
+
+def _autojoin_blocked():
+    """Flag file holding a YYYY-MM-DD date: while today <= that date the
+    scheduler never signs in / joins Zoom. Self-expires the next day.
+    Returns (blocked, until_date_str)."""
+    try:
+        with open(NO_AUTOJOIN_FLAG, encoding="utf-8") as f:
+            d = f.read().strip()
+    except Exception:
+        return False, None
+    if not d:
+        return False, None
+    try:
+        until = datetime.strptime(d, "%Y-%m-%d").date()
+    except Exception:
+        return False, None
+    return datetime.now().date() <= until, d
+
+def _set_autojoin_blocked(block):
+    """Admin UI toggle. block=True -> flag dated today (halts until midnight,
+    self-expires); block=False -> flag removed, auto-join resumes."""
+    try:
+        if block:
+            with open(NO_AUTOJOIN_FLAG, "w", encoding="utf-8") as f:
+                f.write(datetime.now().strftime("%Y-%m-%d"))
+        else:
+            try:
+                os.remove(NO_AUTOJOIN_FLAG)
+            except Exception:
+                pass
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:120]}
+    blocked, until = _autojoin_blocked()
+    return {"ok": True, "autojoin_blocked": bool(blocked), "flag_date": until or ""}
 
 def scheduler_loop():
     """Every 30s, check each weekly meeting: inside its T-15min window and not
@@ -3492,6 +3580,14 @@ def scheduler_loop():
                 key = "%s|%s" % (m["id"], start.date().isoformat())
                 if 0 <= delta <= 900 and key not in seen:
                     seen[key] = True
+                    blocked, until = _autojoin_blocked()
+                    if blocked:
+                        _SCHED["events"].append({"when": now.isoformat(timespec="seconds"),
+                                                 "profile": m["name"],
+                                                 "status": "blocked: no-autojoin flag until %s" % until})
+                        log("scheduler: BLOCKED auto-join %s (flag until %s)" % (m["name"], until))
+                        _SCHED["events"] = _SCHED["events"][-20:]
+                        continue
                     _SCHED["events"].append({"when": now.isoformat(timespec="seconds"),
                                              "profile": m["name"], "status": "triggering"})
                     log("scheduler: T-%.0f min -> auto-join %s" % (delta / 60, m["name"]))
