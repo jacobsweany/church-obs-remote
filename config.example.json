@@ -1,6 +1,7 @@
 {
   "port": 8080,
   "token": "CHANGE_ME_admin_token_secrets_token_hex_24",
+  "wb_profile": "",
   "camera": {
     "host": "192.168.1.50",
     "port": 80,
@@ -28,7 +29,10 @@
       "name": "Sunday Morning",
       "zoom_account": "ward-a",
       "confno": "12345678901",
-      "weekly": { "dow": 0, "time": "09:00" },
+      "weekly": {
+        "dow": 0,
+        "time": "09:00"
+      },
       "scene": "Podium+Chorister"
     }
   ],

@@ -24,7 +24,6 @@ import secrets
 import socket
 import struct
 import subprocess
-import os
 import sys
 import signal
 import threading
@@ -40,17 +39,36 @@ HOME = os.path.expanduser("~/church")
 CONFIG_PATH = os.path.join(HOME, "config.json")
 LOG_PATH = os.path.join(HOME, "dash.log")
 
+LOG_MAX_BYTES = 10 << 20      # rotate past this
+LOG_KEEP_BYTES = 2 << 20      # keep newest tail
 def log(*a):
     line = time.strftime("%Y-%m-%d %H:%M:%S ") + " ".join(str(x) for x in a)
     try:
+        try:
+            if os.path.getsize(LOG_PATH) > LOG_MAX_BYTES:
+                with open(LOG_PATH, "rb") as f:
+                    f.seek(-LOG_KEEP_BYTES, 2)
+                    tail = f.read()
+                nl = tail.find(b"\n")
+                if nl >= 0:
+                    tail = tail[nl + 1:]
+                with open(LOG_PATH, "w") as f:
+                    f.write("-- log rotated: newest %d bytes kept --\n" % len(tail))
+                    f.write(tail.decode("utf-8", "replace"))
+        except Exception:
+            pass
         with open(LOG_PATH, "a") as f:
             f.write(line + "\n")
     except Exception:
         pass
 
 def load_config():
-    with open(CONFIG_PATH) as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except Exception as e:
+        log("config: load failed (%s): starting EMPTY - run /setup first-run flow" % e)
+        return {}
 
 def save_config(c):
     with open(CONFIG_PATH, "w") as f:
@@ -95,7 +113,7 @@ def _token_entry(tok):
             return entry
     if CFG.get("token") and tok == CFG["token"]:
         return {"admin": True, "name": "Admin"}
-    return {"admin": True, "name": "Admin"}
+    return None
 
 # --- session tracking (who used the dashboard, when, and from where) ---
 _SESSIONS = {}  # token -> record: name/admin/first/last/visits/visit_start/active_seconds/browser/os/device
@@ -604,23 +622,6 @@ class CameraClient:
         self.port = int(cfg.get("port", 80))
         self.user = cfg.get("user")
         self.password = cfg.get("pass")
-
-    def digest_header(self, method, uri, challenge):
-        parts = {k: (v or w) for k, v, w in re.findall(r'(\w+)=(?:"([^"]*)"|([^\s,]+))', challenge or "")}
-        realm = parts.get("realm", "")
-        nonce = parts.get("nonce", "")
-        qop = parts.get("qop", "")
-        ha1 = hashlib.md5(("%s:%s:%s" % (self.user, realm, self.password)).encode()).hexdigest()
-        ha2 = hashlib.md5(("%s:%s" % (method, uri)).encode()).hexdigest()
-        if "auth" in qop:
-            cnonce = secrets.token_hex(8)
-            resp = hashlib.md5(("%s:%s:00000001:%s:auth:%s" % (ha1, nonce, cnonce, ha2)).encode()).hexdigest()
-            return ('Digest username="%s", realm="%s", nonce="%s", uri="%s", '
-                    'qop=auth, nc=00000001, cnonce="%s", response="%s"'
-                    % (self.user, realm, nonce, uri, cnonce, resp))
-        resp = hashlib.md5(("%s:%s:%s" % (ha1, nonce, ha2)).encode()).hexdigest()
-        return ('Digest username="%s", realm="%s", nonce="%s", uri="%s", response="%s"'
-                % (self.user, realm, nonce, uri, resp))
 
     def _base_curl(self):
         cmd = ["curl", "-s"]
@@ -2508,7 +2509,7 @@ function refresh(){
     const svS=document.getElementById("svcStart"), svP=document.getElementById("svcStop");
     if(!svS.disabled)svS.disabled=svcA;
     if(!svP.disabled)svP.disabled=!svcA;
-    document.getElementById("wbRow").style.display=(s.is_admin||s.profile_name==="Stake")?"":"none";
+    document.getElementById("wbRow").style.display=(s.is_admin||s.profile_name==="$WBPROF$")?"":"none";
     const ar=document.getElementById("activeRow");
     const ss=s.sessions||[];
     ar.style.display="";
@@ -2963,7 +2964,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/":
-            body = UI_HTML.encode()
+            body = UI_HTML.replace("$WBPROF$", CFG.get("wb_profile", "")).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store, max-age=0, must-revalidate")
@@ -3134,100 +3135,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        if path.startswith("/api/debug/") and not self._is_admin():
-            self._json(403, {"error": "debug endpoints require the admin token"})
-            return
-        if path == "/api/debug/cam":
-            # TEMP debug: fetch a camera page with the dashboard's working auth.
-            if CAM is None:
-                self._json(500, {"error": "camera not configured"})
-                return
-            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            cp = q.get("p", ["/"])[0]
-            if not cp.startswith("/"):
-                cp = "/" + cp
-            try:
-                status, body, headers = CAM.get(cp, timeout=10)
-            except Exception as e:
-                self._json(502, {"error": str(e)[:200]})
-                return
-            ct = (headers.get("Content-Type") or "").lower()
-            is_text = any(t in ct for t in ("text", "json", "javascript", "xml", "html"))
-            out = {"status": status, "content_type": ct, "length": len(body),
-                   "www_authenticate": headers.get("WWW-Authenticate", "")}
-            if is_text:
-                out["body"] = body[:300000].decode("utf-8", "replace")
-            else:
-                out["head_hex"] = body[:16].hex()
-                out["body_b64_head"] = base64.b64encode(body[:256]).decode()
-            self._json(200, out)
-            return
-        if path == "/api/debug/ax2":
-            # TEMP: is THIS process (dashboard python) AX-trusted?
-            import ctypes as _ct
-            _appsv = _ct.cdll.LoadLibrary("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
-            _appsv.AXIsProcessTrusted.restype = _ct.c_bool
-            self._json(200, {"dashboard_trusted": bool(_appsv.AXIsProcessTrusted())})
-            return
-        if path == "/api/debug/ax":
-            # TEMP debug: run zoom_ax in the dashboard's process context
-            out = {}
-            for arg in (["trusted"], ["dump", "3"], ["names"], ["press", "participants"]):
-                r = subprocess.run([_ZAX_BIN] + arg, capture_output=True, text=True, timeout=30)
-                out[" ".join(arg)] = {"rc": r.returncode,
-                                     "out": (r.stdout or "")[:3000],
-                                     "err": (r.stderr or "")[:300]}
-            self._json(200, out)
-            return
-        if path == "/api/debug/keychain":
-            out = {}
-            for acct in ("zoom-user", "zoom-pass"):
-                r = subprocess.run(["security", "find-generic-password", "-s", "church-dash", "-a", acct, "-w"],
-                                   capture_output=True, text=True, timeout=5)
-                out[acct] = {"rc": r.returncode, "len": len(r.stdout.strip()), "err": r.stderr.strip()[:80]}
-            self._json(200, out)
-            return
 
-        if path == "/api/debug/zoomui":
-            script = r'''
-set out to ""
-tell application "System Events"
-  set pnames to name of every process
-  set out to "has_zoomus=" & (pnames contains "zoom.us") & linefeed
-  set out to out & "has_Zoom=" & (pnames contains "Zoom") & linefeed
-  set procName to ""
-  if (pnames contains "zoom.us") then
-    set procName to "zoom.us"
-  else if (pnames contains "Zoom") then
-    set procName to "Zoom"
-  end if
-  set out to out & "procName=" & procName & linefeed
-  if procName is not "" then
-    tell process procName
-      set out to out & "windows=" & (count of windows) & linefeed
-      if (count of windows) > 0 then
-        try
-          set out to out & "win1=" & (name of window 1) & linefeed
-        end try
-        try
-          set out to out & "buttons=" & (name of every button of window 1 as text) & linefeed
-        on error be
-          set out to out & "buttons=ERR:" & be & linefeed
-        end try
-        try
-          set out to out & "textfields=" & (name of every text field of window 1 as text) & linefeed
-        on error te
-          set out to out & "textfields=ERR:" & te & linefeed
-        end try
-      end if
-    end tell
-  end if
-end tell
-return out
-'''
-            r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=20)
-            self._json(200, {"rc": r.returncode, "out": r.stdout.strip()[:1500], "err": r.stderr.strip()[:200]})
-            return
         self._json(404, {"error": "not found"})
 
     def proxy_stream(self):
@@ -3288,18 +3196,6 @@ return out
                 r = _set_autojoin_blocked(bool(b.get("blocked")))
                 self._json(200 if r.get("ok") else 500, r)
                 return
-            if path == "/api/debug/osa":
-                if not self._is_admin():
-                    self._json(403, {"error": "admin token required"})
-                    return
-                sc = str(b.get("script", ""))
-                if not sc or len(sc) > 20000:
-                    self._json(400, {"error": "script required (max 20000 chars)"})
-                    return
-                r = subprocess.run(["osascript", "-e", sc], capture_output=True, text=True, timeout=60)
-                self._json(200, {"rc": r.returncode, "out": r.stdout.strip()[:2000], "err": r.stderr.strip()[:300]})
-                return
-
             if path == "/api/screenshot":
                 if not self._is_admin():
                     self._json(403, {"error": "admin token required"})
@@ -3567,6 +3463,7 @@ def scheduler_loop():
     yet handled -> run the full service start for that profile.
     Skips if a meeting is already in progress (protects back-to-back Sundays)."""
     seen = {}
+    blocked_logged = {}  # log each blocked window once
     while True:
         time.sleep(30)
         try:
@@ -3578,16 +3475,20 @@ def scheduler_loop():
                 start = _next_start(wk, now)
                 delta = (start - now).total_seconds()
                 key = "%s|%s" % (m["id"], start.date().isoformat())
-                if 0 <= delta <= 900 and key not in seen:
-                    seen[key] = True
+                if 0 <= delta <= 900:
                     blocked, until = _autojoin_blocked()
                     if blocked:
-                        _SCHED["events"].append({"when": now.isoformat(timespec="seconds"),
-                                                 "profile": m["name"],
-                                                 "status": "blocked: no-autojoin flag until %s" % until})
-                        log("scheduler: BLOCKED auto-join %s (flag until %s)" % (m["name"], until))
-                        _SCHED["events"] = _SCHED["events"][-20:]
+                        if key not in blocked_logged:
+                            blocked_logged[key] = True
+                            _SCHED["events"].append({"when": now.isoformat(timespec="seconds"),
+                                                     "profile": m["name"],
+                                                     "status": "blocked: no-autojoin flag until %s" % until})
+                            log("scheduler: BLOCKED auto-join %s (flag until %s)" % (m["name"], until))
+                            _SCHED["events"] = _SCHED["events"][-20:]
                         continue
+                    if key in seen:
+                        continue
+                    seen[key] = True
                     _SCHED["events"].append({"when": now.isoformat(timespec="seconds"),
                                              "profile": m["name"], "status": "triggering"})
                     log("scheduler: T-%.0f min -> auto-join %s" % (delta / 60, m["name"]))

@@ -35,6 +35,7 @@ and per-account tokens so several people can share the console.
 - **Single file, Python standard library only** — no pip dependencies for the
   server itself. `church_dash.py` is the whole app (~3.3k lines).
 - Binds **127.0.0.1 only**; a reverse proxy (cloudflared) is the only route in.
+- `wb_profile` (optional): congregation name whose non-admin token also sees the whiteboard row.
 - Auth is **Bearer tokens** (per account + admin) with `hmac.compare_digest`
   checks; admin endpoints are gated by token class.
 - Zoom automation is macOS-specific (AppleScript + CoreGraphics events); the
