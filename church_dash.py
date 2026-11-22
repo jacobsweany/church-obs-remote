@@ -345,6 +345,7 @@ def _load_meetings_csv():
                     "weekly": weekly,
                     "scene": (r.get("scene") or "").strip() or None,
                     "zoom_account": name,
+                    "auto_logout_min": (r.get("auto_logout_min") or "").strip(),
                 })
         _CSV_CACHE.update(mtime=mt, meetings=rows)
         log("csv: loaded %d congregation(s) from %s" % (len(rows), _CSV_PATH))
@@ -385,6 +386,7 @@ def _profile_for_entry(entry):
 
 # one-account-at-a-time tracking (survives within a dashboard run)
 _LAST_ZOOM_ACCOUNT = None
+_SVC_SESSION = None  # last svc_start: auto-logout bookkeeping
 _SVC_ACTIVE = False  # service sequence is up (set by svc_start / cleared by svc_stop)
 
 def _set_last_zoom_account(aid):
@@ -1859,6 +1861,7 @@ end tell
 
 # -------------------------------------------------------------- sequences ---
 def svc_start(profile_id=None):
+    global _SVC_SESSION
     steps = []
 
     def add(name, ok, detail=""):
@@ -1923,6 +1926,21 @@ def svc_start(profile_id=None):
             add("obs scene", True, sc)
         except Exception as e:
             add("obs scene", False, str(e)[:120])
+    try:
+        mins = int(str(m.get("auto_logout_min")).strip() or CFG.get("auto_logout_min", 75))
+    except (TypeError, ValueError):
+        mins = 75
+    if mins:
+        _now = datetime.now()
+        an = _next_start(m["weekly"], _now) if m.get("weekly") else None
+        if an is None or not (_now - timedelta(minutes=30) <= an <= _now + timedelta(minutes=40)):
+            an = _now + timedelta(minutes=15)   # manual/ad-hoc start: anchor = join + 90 min
+        _SVC_SESSION = {"id": m["id"], "name": m["name"], "join_at": _now,
+                        "sched_start": an, "mins": mins, "logout_done": False}
+        log("svc: auto-logout scheduled for %s at %s"
+            % (m["name"], (an + timedelta(minutes=mins)).strftime("%H:%M")))
+    else:
+        _SVC_SESSION = None
     ok_all = all(s["ok"] for s in steps)
     op_finish(ok_all, "all steps completed" if ok_all else "completed with failures")
     global _SVC_ACTIVE
@@ -1957,8 +1975,10 @@ def svc_stop():
         add("obs", True, "left running (virtual camera stays up)")
     ok_all = all(s["ok"] for s in steps)
     op_finish(ok_all, "all steps completed" if ok_all else "completed with failures")
-    global _SVC_ACTIVE
+    global _SVC_ACTIVE, _SVC_SESSION
     _SVC_ACTIVE = not ok_all  # keep "active" if the stop itself failed
+    if ok_all:
+        _SVC_SESSION = None   # clean sign-out: cancel pending auto-logout
     return {"ok": ok_all, "steps": steps}
 
 # ------------------------------------------------------------------- state -
@@ -1968,6 +1988,9 @@ def build_state():
     st = {"obs": {"connected": False}, "camera": {"reachable": False, "stream": None},
           "zoom": {"running": False, "account": _LAST_ZOOM_ACCOUNT},
           "obs_running": obs_running(), "svc": {"active": _SVC_ACTIVE}}
+    if _SVC_ACTIVE and _SVC_SESSION and not _SVC_SESSION.get("logout_done"):
+        st["svc"]["auto_logout_at"] = ((_SVC_SESSION.get("sched_start") or _SVC_SESSION["join_at"])
+                                      + timedelta(minutes=_SVC_SESSION["mins"])).isoformat(timespec="seconds")
     if OBS:
         if OBS.connected:
             st["obs"]["connected"] = True
@@ -2162,6 +2185,7 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
   <div class="mut" id="schedLine" style="margin-bottom:8px;font-size:12px"></div>
   <div id="schedToggle" style="display:none">
     <button class="btn" id="schedToggleBtn" type="button" style="margin-top:0">…</button>
+    <div class="mut" id="schedLo" style="font-size:11.5px;margin-top:4px"></div>
     <div class="mut" style="font-size:11.5px;margin-top:5px">Halting stops the scheduled auto sign-in/join until midnight (or until you resume). Manual Join is unaffected.</div>
   </div>
   <div class="row">
@@ -2470,6 +2494,8 @@ document.getElementById("roSignout").onclick=()=>{try{localStorage.removeItem("c
       btn.textContent=label(blocked,d.flag_date);
       btn.classList.toggle("green",!blocked);
       btn.classList.toggle("red",blocked);
+      const lo=document.getElementById("schedLo");
+      if(lo)lo.textContent=d.auto_logout_at?("Zoom auto-logout at "+d.auto_logout_at.slice(11,16)+" if still signed in as "+(d.auto_logout_profile||"")):"";
     }catch(e){/* non-admin or transient: keep last state */}
   }
   btn.onclick=async()=>{
@@ -3066,7 +3092,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(403, {"error": "admin token required"})
                 return
             blocked, until = _autojoin_blocked()
-            self._json(200, {"autojoin_blocked": bool(blocked), "flag_date": until or ""})
+            sess = _SVC_SESSION
+            nxt, prof = "", ""
+            if sess and _SVC_ACTIVE and not sess.get("logout_done"):
+                nxt = ((sess.get("sched_start") or sess["join_at"])
+                       + timedelta(minutes=sess["mins"])).isoformat(timespec="seconds")
+                prof = sess["name"]
+            self._json(200, {"autojoin_blocked": bool(blocked), "flag_date": until or "",
+                             "auto_logout_at": nxt, "auto_logout_profile": prof})
             return
         if path == "/api/state":
             if self._is_zoom_ro():
@@ -3462,6 +3495,7 @@ def scheduler_loop():
     """Every 30s, check each weekly meeting: inside its T-15min window and not
     yet handled -> run the full service start for that profile.
     Skips if a meeting is already in progress (protects back-to-back Sundays)."""
+    global _SVC_ACTIVE
     seen = {}
     blocked_logged = {}  # log each blocked window once
     while True:
@@ -3506,6 +3540,32 @@ def scheduler_loop():
                         log("scheduler: %s FAILED: %s" % (m["name"], e))
                         _SCHED["events"][-1]["status"] = "error: %s" % e
                     _SCHED["events"] = _SCHED["events"][-20:]
+            # Auto-logout: sign out mins after the meeting's scheduled start
+            # (default 75 = 90 min after the T-15 join; CSV auto_logout_min=0
+            # disables - stake profile stays signed in). Only fires while that
+            # profile is still the signed-in Zoom account.
+            sess = _SVC_SESSION
+            if sess and _SVC_ACTIVE and not sess.get("logout_done"):
+                anchor = sess.get("sched_start") or sess["join_at"]
+                if now >= anchor + timedelta(minutes=sess["mins"]):
+                    sess["logout_done"] = True
+                    if zoom_running() and _LAST_ZOOM_ACCOUNT == sess["name"]:
+                        log("scheduler: auto-logout %s (+%d min past start)"
+                            % (sess["name"], sess["mins"]))
+                        _SCHED["events"].append({"when": now.isoformat(timespec="seconds"),
+                                                 "profile": sess["name"],
+                                                 "status": "auto-logout"})
+                        try:
+                            r = zoom_signout()
+                            _SCHED["events"][-1]["status"] = "auto-logout: " + str(r.get("detail", ""))[:120]
+                            log("scheduler: auto-logout result: %s" % json.dumps(r)[:200])
+                            _SVC_ACTIVE = False
+                            _SCHED["events"] = _SCHED["events"][-20:]
+                        except Exception as e:
+                            log("scheduler: auto-logout FAILED: %s" % e)
+                    else:
+                        log("scheduler: auto-logout skipped: %s not signed in / Zoom not running"
+                            % sess["name"])
         except Exception as e:
             log("scheduler tick error:", e)
 

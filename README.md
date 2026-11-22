@@ -72,6 +72,15 @@ examples/com.church.dash.plist   launchd agent template (run at boot, keep alive
      OBS: Settings → General → Stream Service → obs-websocket, or the plugin).
    - `zoom.confno` — default conference ID used by the Join button.
    - `meetings` — optional weekly schedule table shown on the console.
+   - `auto_logout_min` — global default (75) for the Zoom auto-sign-out:
+     after a service start, the dashboard signs out of Zoom that many
+     minutes **after the meeting's scheduled start** (= 90 min after the
+     T-15 min auto-join). Per-congregation override lives in
+     `congregations.csv` column `auto_logout_min`; set `0` to disable
+     (e.g. a stake-level account that must stay signed in). The timer is
+     armed by Start Service (manual or scheduled) and cancelled by a
+     successful Stop Service; it only fires while that congregation is
+     still the signed-in Zoom account.
    - `tokens` — one entry per account. Give the admin entry
      `"admin": true`; give a read-only token `"zoom_ro": true` (it may then
      only call `/api/state` and `/api/zoom/participants` — a
