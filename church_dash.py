@@ -275,17 +275,23 @@ _PROFILE_LOCK = threading.Lock()
 # other). Read-only ops (attendees) also take it briefly.
 _ZOOM_OP_LOCK = threading.RLock()  # reentrant: signout nests into leave/logout
 
+# app/home-screen icon (180x180 PNG, generated once - served at /icon.png)
+_ICON_B64 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAACB0lEQVR42u3cuwmFUBBAwVuBYGIDhhZgGTZmoSZm5moBooLo/ThwQmF57oDJ8kJVN9JhwSsQHIJDcAgOwSE4BIfgEByCQ4JDcAgOwSE4BIfgEByCQ3BIcAgOZYij7frzpnnZu3zMXDjggAMOOOCAw5LggAMOOOCAAw444IADDjjMhQMOOOCAAw44LAkOS4IDDjjggAMOOOCAI1Ucw7h+FhxwwAEHHHDAAQcccMABBxxwwAEHHHDAAQcccMABBxxwwAEHHHDAAQcccMABBxxwwAEHHNkeGN/MgTEccMBRCo50PqNwwAEHHHDAAQcccMABBxxwwAEHHHDAAQcccMABBxxwwAEHHHDAAQcccMABBxxwwAEHHHAkfGD80u+FAw444IADDjjggAMOOOCAAw444IADDjj+iyOjP42BAw444IADDjjggAMOOOCAAw444IADDjjggAMOOOCAAw444IADDjjggAMOOOCAAw444IAj3oFxYXPhMBcOOOCAAw444LAkOCwJDjjggAMOOOCAAw44zIUDDjjggAMOOOCAw5LggAMOOOCAAw444IDDXDjggAMOOOCAAw44LAkOOOCAAw444IADDjjMhcNcOOCAAw444IDDkuCAAw444IADjpg4lH5wCA7BITgEh+AQHIJDcAgOwSHBITgEh+AQHIJDcAgOwSE4JDgEhx60AbUkTj1KUpf/AAAAAElFTkSuQmCC"
+
 # --- live operation progress (UI polls /api/operation while an action runs) ---
-_OP = {"op": None, "step": None, "updated": 0, "done": False, "ok": None, "detail": None}
+_OP = {"op": None, "step": None, "updated": 0, "done": False, "ok": None, "detail": None, "steps": []}
 _OP_LOCK = threading.Lock()
 
 def op_begin(name):
     with _OP_LOCK:
-        _OP.update(op=name, step=None, updated=time.time(), done=False, ok=None, detail=None)
+        _OP.update(op=name, step=None, updated=time.time(), done=False, ok=None, detail=None, steps=[])
 
 def op_step(text):
+    t = str(text)[:200]
     with _OP_LOCK:
-        _OP.update(step=str(text)[:200], updated=time.time())
+        _OP.update(step=t, updated=time.time())
+        if not (_OP["steps"] and _OP["steps"][-1] == t):
+            _OP["steps"].append(t)
 
 def op_finish(ok, detail=""):
     with _OP_LOCK:
@@ -1991,6 +1997,22 @@ def build_state():
     if _SVC_ACTIVE and _SVC_SESSION and not _SVC_SESSION.get("logout_done"):
         st["svc"]["auto_logout_at"] = ((_SVC_SESSION.get("sched_start") or _SVC_SESSION["join_at"])
                                       + timedelta(minutes=_SVC_SESSION["mins"])).isoformat(timespec="seconds")
+    try:
+        nm = None
+        for m in _meetings():
+            wk = m.get("weekly")
+            if not wk:
+                continue
+            t = _next_start(wk, datetime.now())
+            if nm is None or t < nm[0]:
+                nm = (t, m["name"])
+        if nm:
+            st["next_meeting"] = {"name": nm[1], "at": nm[0].isoformat(timespec="minutes")}
+        blk, until = _autojoin_blocked()
+        st["autojoin_blocked"] = bool(blk)
+        st["autojoin_until"] = until or ""
+    except Exception:
+        pass
     if OBS:
         if OBS.connected:
             st["obs"]["connected"] = True
@@ -2047,12 +2069,27 @@ def build_state():
 UI_HTML = """<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Church Console">
+<link rel="icon" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
 <title>Church OBS Remote</title>
 <style>
 :root{--bg:#0e1116;--card:#161b23;--line:#232b37;--fg:#e8edf4;--mut:#8b98ab;--acc:#4f8cff;--ok:#31c48d;--bad:#f0564f;--warn:#f2b544}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 button,.chip{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:14px 14px 40px}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:calc(14px + env(safe-area-inset-top)) 14px calc(40px + env(safe-area-inset-bottom))}
+#svcStop{position:relative;overflow:hidden}
+#svcStop.arming::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.25);transform:scaleX(0);transform-origin:left;animation:stopArm 1s linear forwards}
+@keyframes stopArm{to{transform:scaleX(1)}}
+#statusLine{display:none;margin:8px 0;padding:8px 10px;border-radius:9px;font-size:13px;border:1px solid var(--line)}
+#statusLine.warn{display:block;background:rgba(242,181,68,.10);border-color:rgba(242,181,68,.45);color:var(--warn)}
+#statusLine.live{display:block;background:rgba(49,196,141,.10);border-color:rgba(49,196,141,.45)}
+#statusLine.info{display:block;background:var(--card)}
+pre.steps{margin:4px 0;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap}
 .wrap{max-width:560px;margin:0 auto}
 h1{font-size:19px;margin:6px 2px 12px;display:flex;align-items:center;gap:10px}
 h1 .dots{margin-left:auto;display:flex;gap:6px;font-size:12px;color:var(--mut);align-items:center}
@@ -2117,6 +2154,7 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
     <span class="dot" id="dZoom"></span><span>Zoom</span>
   </span></h1>
 <div id="updAge" class="mut" style="font-size:11px;height:1.5em;line-height:1.5em;margin-top:1px"></div>
+<div id="statusLine" role="status"></div>
 <div id="roWrap" class="hidden">
   <div class="card" style="margin-top:10px">
     <div style="font-size:17px;font-weight:700;margin-bottom:8px">Zoom Participants</div>
@@ -2284,18 +2322,21 @@ async function showAttendees(){
 }
 function res(id,ok,txt){const e=document.getElementById(id);if(!e)return;e.innerHTML=(ok?"✔ ":"✘ ")+(txt||"").replace(/</g,"&lt;");e.classList.toggle("err",!ok);}
 async function act(id,fn,rid,busy){
-  const b=document.getElementById(id);b.disabled=true;
+  const b=document.getElementById(id);b.disabled=true;window._actBusy=id;
   const orig=b.innerHTML;
   b.innerHTML='<span class="spin"></span>'+(busy||"Working…");
   let poll=null;
   const tick=async()=>{try{
     const o=await api("/api/operation");
     if(rid&&o&&o.op&&!o.done&&o.step){const e=document.getElementById(rid);
-      if(e){e.innerHTML='<span class="mut">⏳ '+String(o.step).replace(/</g,"&lt;")+'</span>';e.classList.remove("err");}}
+      if(e){const L=(o.steps||[]).slice(-10);
+        e.innerHTML='<span class="mut">\u23f3 '+String(o.step).replace(/</g,"&lt;")+'</span>'
+          +(L.length>1?'<pre class="steps">'+L.slice(0,-1).map(x=>String(x).replace(/</g,"&lt;")).join("\\n")+'</pre>':'');
+        e.classList.remove("err");}}
   }catch(x){}};
   if(rid){tick();poll=setInterval(tick,900);}
   try{const d=await fn();return d;}catch(e){if(rid)res(rid,false,String(e.message||e));throw e;}
-  finally{if(poll)clearInterval(poll);b.disabled=false;b.innerHTML=orig;}
+  finally{if(poll)clearInterval(poll);b.disabled=false;b.innerHTML=orig;window._actBusy=null;}
 }
 document.getElementById("gateGo").onclick=async()=>{
   const t=document.getElementById("tok").value.trim();
@@ -2338,8 +2379,21 @@ document.getElementById("credSave").onclick=async()=>{
 };
 document.getElementById("svcStart").onclick=async()=>{try{const d=await act("svcStart",()=>api("/api/service/start",undefined,"POST"),"svcResult");
   document.getElementById("svcResult").innerHTML=d.steps.map(s=>`<b>${s.ok?"✔":"✘"} ${s.step}</b> — ${String(s.detail).replace(/</g,"&lt;")}`).join("\\n");refresh();}catch(e){res("svcResult",false,String(e.message||e));}};
-document.getElementById("svcStop").onclick=async()=>{try{const d=await act("svcStop",()=>api("/api/service/stop",undefined,"POST"),"svcResult");
-  document.getElementById("svcResult").innerHTML=d.steps.map(s=>`<b>${s.ok?"✔":"✘"} ${s.step}</b> — ${String(s.detail).replace(/</g,"&lt;")}`).join("\\n");refresh();}catch(e){res("svcResult",false,String(e.message||e));}};
+(function(){
+const stopBtn=document.getElementById("svcStop");
+let holdT=null,holdFired=false;
+function renderStop(d){document.getElementById("svcResult").innerHTML=d.steps.map(s=>`<b>${s.ok?"✔":"✘"} ${s.step}</b> — ${String(s.detail).replace(/</g,"&lt;")}`).join("\\n");refresh();}
+function go(){holdFired=true;stopBtn.classList.remove("arming");
+  act("svcStop",()=>api("/api/service/stop",undefined,"POST"),"svcResult").then(renderStop).catch(e=>{res("svcResult",false,String(e.message||e));});}
+stopBtn.addEventListener("pointerdown",()=>{if(stopBtn.disabled)return;holdFired=false;
+  stopBtn.classList.add("arming");holdT=setTimeout(go,1000);});
+function release(){stopBtn.classList.remove("arming");
+  if(holdT){clearTimeout(holdT);holdT=null;
+    if(!holdFired)res("svcResult",false,"Hold the button for 1 second to stop the service.");}}
+stopBtn.addEventListener("pointerup",release);
+stopBtn.addEventListener("pointerleave",release);
+stopBtn.addEventListener("pointercancel",release);
+})();
 document.querySelectorAll("[data-mv]").forEach(b=>{
   const mv=b.dataset.mv;
   const stopFor=(mv==="zoomin"||mv==="zoomout")?"zoomstop":"ptzstop";
@@ -2525,6 +2579,18 @@ function refresh(){
     dO.className="dot "+(s.obs.connected?"on":"off");
     dC.className="dot "+(s.camera.reachable?"on":"off");
     dZ.className="dot "+(s.zoom.running?"on":"off");
+    const sl=document.getElementById("statusLine");
+    if(sl){
+      sl.className="";
+      if(s.autojoin_blocked){sl.className="warn";sl.textContent="\u23f8\ufe0f Auto-join halted"+(s.autojoin_until?" until "+s.autojoin_until:"");}
+      else if(s.svc.active){sl.className="live";sl.textContent="\u25cf Service running"+(s.svc.auto_logout_at?(" \u00b7 Zoom auto-logout "+s.svc.auto_logout_at.slice(11,16)):"");}
+      else if(s.next_meeting){
+        sl.className="info";
+        const t=new Date(s.next_meeting.at), j=new Date(t.getTime()-900000);
+        const hh=x=>String(x.getHours()).padStart(2,"0")+":"+String(x.getMinutes()).padStart(2,"0");
+        sl.textContent="Next: "+s.next_meeting.name+" "+hh(t)+" \u00b7 auto-join "+hh(j);
+      }
+    }
     dO.title=s.obs.connected?("OBS connected"+(s.obs.current?" · scene: "+s.obs.current:"")):"OBS not connected";
     dC.title=s.camera.reachable?"Camera reachable":"Camera unreachable";
     dZ.title=s.zoom.running?("Zoom running"+(s.zoom.account?" · "+s.zoom.account:"")):"Zoom not running";
@@ -2533,8 +2599,8 @@ function refresh(){
     // service buttons: disable whichever is not applicable (don't clobber act()'s busy state)
     const svcA=!!(s.svc&&s.svc.active);
     const svS=document.getElementById("svcStart"), svP=document.getElementById("svcStop");
-    if(!svS.disabled)svS.disabled=svcA;
-    if(!svP.disabled)svP.disabled=!svcA;
+    svS.disabled=svcA||window._actBusy==="svcStart";
+    svP.disabled=!svcA||window._actBusy==="svcStop";
     document.getElementById("wbRow").style.display=(s.is_admin||s.profile_name==="$WBPROF$")?"":"none";
     const ar=document.getElementById("activeRow");
     const ss=s.sessions||[];
@@ -2989,6 +3055,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
+        if path == "/icon.png":
+            body = base64.b64decode(_ICON_B64)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/":
             body = UI_HTML.replace("$WBPROF$", CFG.get("wb_profile", "")).encode()
             self.send_response(200)
