@@ -2245,19 +2245,17 @@ label.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var
 .chip{border:1px solid var(--line);background:#1d2430;border-radius:999px;padding:9px 15px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--fg)}
 .chip.cur{background:#1c3a66;border-color:#2f5da8;color:#cfe1ff}
 .chip:active{transform:scale(.96)}
-.padrow{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:10px;flex-wrap:wrap}
-.pad{display:grid;grid-template-columns:repeat(3,64px);grid-auto-rows:52px;gap:8px}
-.pad .btn{width:64px;height:52px;margin:0;font-size:20px;padding:0}
+.padrow{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:10px;flex-wrap:wrap}
+.pad{display:grid;grid-template-columns:repeat(3,70px);grid-auto-rows:60px;gap:8px}
+.pad .btn{width:70px;height:60px;margin:0;font-size:22px;padding:0}
 .zoomcol{display:flex;gap:10px;align-items:center}
 .zoomcol .zoombtns{display:flex;flex-direction:column;gap:8px}
 .spdwrap{display:flex;flex-direction:column;align-items:center;gap:4px}
-.vrange{writing-mode:vertical-lr;direction:rtl;height:96px;width:36px;accent-color:var(--acc);margin:0}
-.zoomcol .btn{width:52px;height:52px;margin:0;font-size:18px;padding:0}
+.vrange{writing-mode:vertical-lr;direction:rtl;height:110px;width:38px;accent-color:var(--acc);margin:0}
+.zoomcol .btn{width:60px;height:60px;margin:0;font-size:20px;padding:0}
 .pad .btn.sp1,.zoomcol .btn.sp1{background:#22344a;border-color:var(--acc)}
 .pad .btn.sp2,.zoomcol .btn.sp2{background:#2b4a6b;border-color:var(--acc);box-shadow:0 0 8px rgba(79,140,255,.35)}
 .pad .btn.sp3,.zoomcol .btn.sp3{background:var(--acc);border-color:var(--acc);color:#fff;box-shadow:0 0 14px rgba(79,140,255,.55)}
-.presetbox{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
-.presetbox summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--mut);padding:4px 2px}
 .stream{width:100%;border-radius:10px;border:1px solid var(--line);background:#000;margin-top:4px;min-height:90px}
 .mut{color:var(--mut);font-size:13px}
 .result{font-size:14px;margin-top:10px;white-space:pre-wrap;color:var(--mut)}
@@ -2322,7 +2320,7 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
 
 
 <div class="card">
-  <div class="ctitle">Camera Controls</div>
+  <div class="ctitle"><span>Camera Controls</span><span class="mut" style="font-size:11px;font-weight:400">tap = fine \u00b7 hold ramps up \u00b7 release = stop</span></div>
   <div class="padrow">
     <div class="pad">
       <span></span><button class="btn" data-mv="up" aria-label="pan up">▲</button><span></span>
@@ -2341,16 +2339,6 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
       </div>
     </div>
   </div>
-  <div class="mut" style="font-size:11.5px;margin-top:4px">Tap = fine \u00b7 hold ramps up \u00b7 release = stop</div>
-  <details class="presetbox" id="presetBox" style="display:none">
-    <summary>Presets</summary>
-    <label class="lbl">Presets (recall)</label>
-    <div class="chips" id="presets"></div>
-    <div class="row">
-      <input id="presetN" type="number" min="0" max="9" placeholder="0–9" style="flex:1;background:#0b0e13;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:11px;font-size:16px">
-      <button class="btn" id="presetSave" style="flex:0 0 auto;width:auto;padding:11px 16px">Save here</button>
-    </div>
-  </details>
 </div>
 
 <div class="card">
@@ -2595,8 +2583,6 @@ document.querySelectorAll("[data-mv]").forEach(b=>{
   sl.value=cur;v.textContent=cur+"%";
   sl.addEventListener("input",()=>{v.textContent=sl.value+"%";localStorage.setItem("ptzmax",sl.value);});
 })();
-document.getElementById("presetSave").onclick=async()=>{const n=document.getElementById("presetN").value;
-  if(n==="")return;try{await act("presetSave",()=>api("/api/camera/preset",{n:+n,save:true}),"camResult");res("camResult",true,"saved position to preset "+n);}catch(e){res("camResult",false,String(e.message||e));}};
 document.getElementById("vcamBtn").onclick=async()=>{try{const d=await api("/api/state");
   await act("vcamBtn",()=>api("/api/obs/vcam",{on:!d.obs.vcam}),"obsResult");
   res("obsResult",true,(d.obs.vcam?"virtual camera off":"virtual camera on"));refresh();}catch(e){res("obsResult",false,String(e.message||e));}};
@@ -2809,7 +2795,6 @@ function refresh(){
       cZ.title=s.zoom.running?("Zoom running"+(s.zoom.account?" · "+s.zoom.account:"")):"Zoom not running";
     }
     document.getElementById("setup").style.display=s.is_admin?"":"none";
-    document.getElementById("presetBox").style.display=s.is_admin?"":"none";
     // service buttons: disable whichever is not applicable (don't clobber act()'s busy state)
     const svcA=!!(s.svc&&s.svc.active);
     const svS=document.getElementById("svcStart"), svP=document.getElementById("svcStop");
@@ -2902,10 +2887,6 @@ function netBad(){
   }
 }
 
-(function(){const el=document.getElementById("presets");
-  for(let i=0;i<10;i++){const c=document.createElement("button");c.type="button";c.className="chip";c.textContent=i;
-    c.onclick=()=>api("/api/camera/preset",{n:i,save:false}).then(()=>res("camResult",true,"preset "+i)).catch(e=>res("camResult",false,String(e.message||e)));
-    el.appendChild(c);} })();
 let previewOn=false, wsObj=null, wsGen=0, wsFails=0, pollTimer=null, fpsN=0;
 function showFrame(blob){
   const el=document.getElementById("stream");
