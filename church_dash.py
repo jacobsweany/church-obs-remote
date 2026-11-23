@@ -2187,7 +2187,8 @@ UI_HTML = """<!doctype html>
 :root{--bg:#0e1116;--card:#161b23;--line:#232b37;--fg:#e8edf4;--mut:#8b98ab;--acc:#4f8cff;--ok:#31c48d;--bad:#f0564f;--warn:#f2b544}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 button,.chip{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:calc(14px + env(safe-area-inset-top)) 14px calc(40px + env(safe-area-inset-bottom))}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:calc(14px + env(safe-area-inset-top)) 14px calc(40px + env(safe-area-inset-bottom));user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+input,textarea,select{user-select:text;-webkit-user-select:text}
 #svcStop{position:relative;overflow:hidden}
 #svcStop.arming::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.25);transform:scaleX(0);transform-origin:left;animation:stopArm 1s linear forwards}
 @keyframes stopArm{to{transform:scaleX(1)}}
