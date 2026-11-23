@@ -352,6 +352,7 @@ def _load_meetings_csv():
                     "scene": (r.get("scene") or "").strip() or None,
                     "zoom_account": name,
                     "auto_logout_min": (r.get("auto_logout_min") or "").strip(),
+                    "auto_join": (r.get("auto_join") or "1").strip() != "0",
                 })
         _CSV_CACHE.update(mtime=mt, meetings=rows)
         log("csv: loaded %d congregation(s) from %s" % (len(rows), _CSV_PATH))
@@ -2005,9 +2006,10 @@ def build_state():
                 continue
             t = _next_start(wk, datetime.now())
             if nm is None or t < nm[0]:
-                nm = (t, m["name"])
+                nm = (t, m["name"], m.get("auto_join", True))
         if nm:
-            st["next_meeting"] = {"name": nm[1], "at": nm[0].isoformat(timespec="minutes")}
+            st["next_meeting"] = {"name": nm[1], "at": nm[0].isoformat(timespec="minutes"),
+                              "auto_join": nm[2]}
         blk, until = _autojoin_blocked()
         st["autojoin_blocked"] = bool(blk)
         st["autojoin_until"] = until or ""
@@ -2588,7 +2590,7 @@ function refresh(){
         sl.className="info";
         const t=new Date(s.next_meeting.at), j=new Date(t.getTime()-900000);
         const hh=x=>String(x.getHours()).padStart(2,"0")+":"+String(x.getMinutes()).padStart(2,"0");
-        sl.textContent="Next: "+s.next_meeting.name+" "+hh(t)+" \u00b7 auto-join "+hh(j);
+        sl.textContent="Next: "+s.next_meeting.name+" "+hh(t)+" "+(s.next_meeting.auto_join===false?"manual join only":"\u00b7 auto-join "+hh(j));
       }
     }
     dO.title=s.obs.connected?("OBS connected"+(s.obs.current?" · scene: "+s.obs.current:"")):"OBS not connected";
@@ -3585,6 +3587,15 @@ def scheduler_loop():
                 delta = (start - now).total_seconds()
                 key = "%s|%s" % (m["id"], start.date().isoformat())
                 if 0 <= delta <= 900:
+                    if not m.get("auto_join", True):
+                        if key not in blocked_logged:
+                            blocked_logged[key] = True
+                            _SCHED["events"].append({"when": now.isoformat(timespec="seconds"),
+                                                     "profile": m["name"],
+                                                     "status": "auto-join disabled for this profile"})
+                            log("scheduler: auto-join DISABLED for %s" % m["name"])
+                            _SCHED["events"] = _SCHED["events"][-20:]
+                        continue
                     blocked, until = _autojoin_blocked()
                     if blocked:
                         if key not in blocked_logged:

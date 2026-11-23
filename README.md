@@ -77,7 +77,10 @@ examples/com.church.dash.plist   launchd agent template (run at boot, keep alive
      minutes **after the meeting's scheduled start** (= 90 min after the
      T-15 min auto-join). Per-congregation override lives in
      `congregations.csv` column `auto_logout_min`; set `0` to disable
-     (e.g. a stake-level account that must stay signed in). The timer is
+     (e.g. a stake-level account that must stay signed in).
+   - CSV column `auto_join` — set `0` on a row to keep its schedule visible
+     but **disable the scheduled auto sign-in/join** for that congregation
+     only (manual Start Service still works). Default is enabled. The timer is
      armed by Start Service (manual or scheduled) and cancelled by a
      successful Stop Service; it only fires while that congregation is
      still the signed-in Zoom account.
