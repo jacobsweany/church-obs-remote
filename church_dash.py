@@ -307,6 +307,14 @@ _DOW = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5,
         "friday": 4, "saturday": 5, "sunday": 6}
 _DOWNAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
+def _clamp_lead(val):
+    """Minutes before start that auto-join fires (default 15)."""
+    try:
+        n = int(str(val if val is not None else "").strip())
+    except (TypeError, ValueError):
+        return 15
+    return n if 1 <= n <= 120 else 15
+
 
 def _cong_payload():
     now = datetime.now()
@@ -334,6 +342,7 @@ def _cong_payload():
                      "dow": _DOWNAMES[wk["dow"]] if wk else "",
                      "time": wk["time"] if wk else "",
                      "auto_join": bool(m.get("auto_join", True)),
+                     "join_lead_min": int(m.get("join_lead_min", 15)),
                      "auto_logout_min": alm,
                      "next": nxt.isoformat(timespec="minutes") if nxt else "",
                      "in_h": int((nxt - now).total_seconds() // 3600) if nxt else None})
@@ -356,7 +365,7 @@ def _cong_save(b):
             rows = list(rd)
     except Exception as e:
         return "csv read failed: %s" % e
-    for extra in ("auto_logout_min", "auto_join"):
+    for extra in ("auto_logout_min", "auto_join", "join_lead_min"):
         if extra not in fields:
             fields.append(extra)
     hit = None
@@ -376,6 +385,14 @@ def _cong_save(b):
         if not 0 <= alm <= 240:
             return "auto_logout_min out of range (0-240)"
         hit["auto_logout_min"] = str(alm)
+    if "join_lead_min" in b:
+        try:
+            lm = int(b.get("join_lead_min"))
+        except (TypeError, ValueError):
+            return "join_lead_min must be an integer"
+        if not 1 <= lm <= 120:
+            return "join_lead_min out of range (1-120)"
+        hit["join_lead_min"] = str(lm)
     tmp = _CSV_PATH + ".tmp"
     try:
         shutil.copy2(_CSV_PATH, _CSV_PATH + ".bak")
@@ -387,8 +404,8 @@ def _cong_save(b):
         os.replace(tmp, _CSV_PATH)
     except Exception as e:
         return "csv write failed: %s" % e
-    log("csv: ui update %s (auto_join=%r auto_logout_min=%r)"
-        % (name, b.get("auto_join"), b.get("auto_logout_min")))
+    log("csv: ui update %s (auto_join=%r auto_logout_min=%r join_lead_min=%r)"
+        % (name, b.get("auto_join"), b.get("auto_logout_min"), b.get("join_lead_min")))
     return None
 
 def _parse_dow(v):
@@ -439,6 +456,7 @@ def _load_meetings_csv():
                     "zoom_account": name,
                     "auto_logout_min": (r.get("auto_logout_min") or "").strip(),
                     "auto_join": (r.get("auto_join") or "1").strip() != "0",
+                    "join_lead_min": _clamp_lead(r.get("join_lead_min")),
                 })
         _CSV_CACHE.update(mtime=mt, meetings=rows)
         log("csv: loaded %d congregation(s) from %s" % (len(rows), _CSV_PATH))
@@ -2092,10 +2110,10 @@ def build_state():
                 continue
             t = _next_start(wk, datetime.now())
             if nm is None or t < nm[0]:
-                nm = (t, m["name"], m.get("auto_join", True))
+                nm = (t, m["name"], m.get("auto_join", True), m.get("join_lead_min", 15))
         if nm:
             st["next_meeting"] = {"name": nm[1], "at": nm[0].isoformat(timespec="minutes"),
-                              "auto_join": nm[2]}
+                              "auto_join": nm[2], "lead": nm[3]}
         blk, until = _autojoin_blocked()
         st["autojoin_blocked"] = bool(blk)
         st["autojoin_until"] = until or ""
@@ -2178,7 +2196,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,
 #statusLine.live{display:block;background:rgba(49,196,141,.10);border-color:rgba(49,196,141,.45)}
 #statusLine.info{display:block;background:var(--card)}
 pre.steps{margin:4px 0;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap}
-.connLine{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mut);margin-bottom:10px}
+.cstat{margin-top:0;font-size:12px;max-width:58%;text-align:right;overflow:hidden}
+.result:empty{margin-top:0}
 .congItem{border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:8px;background:#12161d}
 .congItem.live{border-color:rgba(49,196,141,.55)}
 .congTop{display:flex;justify-content:space-between;align-items:center;font-size:15px}
@@ -2258,12 +2277,13 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
   <button class="btn blue" id="gateGo">Unlock</button>
 </div></div>
 
-<h1>Church OBS Remote <span id="scopeName" class="mut" style="font-size:13px;font-weight:400"></span></h1>
+<h1>Church OBS Remote <span id="scopeName" class="mut" style="font-size:13px;font-weight:400"></span>
+  <span class="dots">
+    <span class="dot" id="cObs"></span><span>OBS</span>
+    <span class="dot" id="cCam"></span><span>Cam</span>
+    <span class="dot" id="cZoom"></span><span>Zoom</span>
+  </span></h1>
 <div id="statusLine" role="status"></div>
-<div id="connTop" class="connLine" style="margin:2px 0 10px"><span class="dot" id="cObs"></span><span>OBS</span>
-  <span class="dot" id="cCam"></span><span>Cam</span>
-  <span class="dot" id="cZoom"></span><span>Zoom</span>
-  <span id="cAge" class="mut"></span></div>
 <div id="roWrap" class="hidden">
   <div class="card" style="margin-top:10px">
     <div class="ctitle">Zoom Participants</div>
@@ -2277,9 +2297,8 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
 <div id="netBanner" class="hidden" style="background:#3a1715;border:1px solid #6e2a26;color:#ff9d94;border-radius:11px;padding:10px 14px;font-size:14px;font-weight:600;margin-bottom:12px" role="alert">⚠ Connection lost — retrying…</div>
 
 <div class="card">
-  <div class="ctitle">OBS Scenes</div>
+  <div class="ctitle"><span>OBS Scenes</span><div class="result cstat" id="obsResult" aria-live="polite"></div></div>
   <div class="chips" id="scenes"><span class="mut">waiting for OBS…</span></div>
-  <div class="result" id="obsResult" aria-live="polite"></div>
 </div>
 
 <div class="card">
@@ -2296,7 +2315,7 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
 
 
 <div class="card">
-  <div class="ctitle">Camera Controls</div>
+  <div class="ctitle"><span>Camera Controls</span><div class="result cstat" id="camResult" aria-live="polite"></div></div>
   <div class="padrow">
     <div class="pad">
       <span></span><button class="btn" data-mv="up" aria-label="pan up">▲</button><span></span>
@@ -2323,26 +2342,16 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
       <button class="btn" id="presetSave" style="flex:0 0 auto;width:auto;padding:11px 16px">Save here</button>
     </div>
   </details>
-  <div class="result" id="camResult" aria-live="polite"></div>
 </div>
 
 <div class="card">
-  <div class="ctitle">Service</div>
+  <div class="ctitle"><span>Service</span><span class="mut" id="attBadge" style="font-size:11px;font-weight:400"></span><span class="mut" id="zoomAcct" style="font-size:11px;margin-left:8px;font-weight:400"></span></div>
   <div class="mut" id="svcMsg">OBS up → Zoom join → camera preset.</div>
   <div id="profPick" style="display:none;margin-bottom:6px"><label class="lbl">Active congregation (admin)</label><div class="chips" id="profChips" style="margin-top:6px"></div></div>
   <div class="mut" id="schedLine" style="margin-bottom:8px;font-size:12px"></div>
   <div class="row">
     <button class="btn big green" id="svcStart">▶ Start Service</button>
     <button class="btn big red" id="svcStop">■ Stop Service</button>
-  </div>
-  <div class="result" id="svcResult" aria-live="polite"></div>
-</div>
-
-<div class="card">
-  <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:7px">
-    <div class="ctitle" style="margin-bottom:0">Zoom</div>
-    <span class="mut" id="attBadge" style="font-size:11px"></span>
-    <span class="mut" id="zoomAcct" style="font-size:11px;margin-left:8px"></span>
   </div>
   <div class="row">
     <button class="btn blue" id="zLogin">🔑 Sign in</button>
@@ -2354,7 +2363,8 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
     <input id="wbId" type="text" inputmode="numeric" placeholder="webinar ID to join on demand" style="flex:1;min-width:0;background:#0b0e13;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:11px;font-size:15px">
     <button class="btn" id="zJoinId" style="flex:0 0 auto;width:auto;padding:11px 14px">🎯 Join ID</button>
   </div>
-  <div class="mut" id="zoomHelp" style="margin-top:8px">Sign-in runs automatically when Join lands on the sign-in screen. Credentials live in the Mac Keychain.</div>
+  <details id="zoomHelp" style="margin-top:8px"><summary class="mut" style="font-size:12px;cursor:pointer">Auto sign-in &amp; Keychain</summary><div class="mut" style="font-size:12px;margin-top:3px">Sign-in runs automatically when Join lands on the sign-in screen. Credentials live in the Mac Keychain.</div></details>
+  <div class="result" id="svcResult" aria-live="polite"></div>
   <div class="result" id="zoomResult" aria-live="polite"></div>
 </div>
 
@@ -2369,8 +2379,12 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
   <div id="congMsg" class="mut" style="font-size:11.5px;min-height:1.3em;margin-top:6px"></div>
 </div>
 
+<div class="card">
+  <div class="ctitle">Sessions</div>
+  <div id="activeRow" style="font-size:13.5px;line-height:1.7"></div>
+</div>
+
 <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
-  <div id="activeRow" style="display:none;font-size:13.5px;line-height:1.7"></div>
   <div style="display:flex;gap:10px;margin-top:12px">
     <button class="btn" id="setup" style="display:none;width:auto;margin-top:0;flex:1">🔑 Set Zoom credentials</button>
     <button class="btn" id="signout" style="width:auto;margin-top:0;flex:1">🔒 Lock console</button>
@@ -2604,9 +2618,10 @@ async function loadAdmin(){
         const sc=await api("/api/admin/schedule");
         if(sc.meetings&&sc.meetings.length){
           const el=document.getElementById("schedLine");
-          el.textContent="Auto-join (15 min before): "+sc.meetings.map(m=>{
-            const d=new Date(m.next_start);
-            return m.name+" · "+d.toLocaleDateString(undefined,{weekday:"short"})+" "+m.weekly.time;
+          const hh2=x=>String(x.getHours()).padStart(2,"0")+":"+String(x.getMinutes()).padStart(2,"0");
+          el.textContent="Auto-join: "+sc.meetings.map(m=>{
+            const d=new Date(m.next_start), jj=new Date(d.getTime()-(m.join_lead_min||15)*60000);
+            return m.name+" · "+d.toLocaleDateString(undefined,{weekday:"short"})+" "+m.weekly.time+" → join "+hh2(jj);
           }).join("  ·  ");
         }
       }catch(e){}
@@ -2692,15 +2707,17 @@ function renderCong(rows,meta){
   box.innerHTML=rows.map((r,i)=>{
     const live=meta.svc_active&&meta.acct===r.name;
     const when=r.weekly?esc(r.dow+" "+r.time):"ad-hoc (no weekly slot)";
-    const nxt=(r.weekly&&r.next)?(" \u00b7 next "+r.next.slice(5,10).replace("-","/")+" (in "+r.in_h+"h)"):"";
-    const sel='<select data-n="'+i+'" data-f="lo" aria-label="Auto sign-out for '+esc(r.name)+'">'+ 
-      [0,30,45,60,75,90,120].map(o=>'<option value="'+o+'"'+(o===r.auto_logout_min?" selected":"")+'>'+(o?("+"+o+" min"):"off")+'</option>').join("")+'</select>';
+    const nxt=(r.weekly&&r.next)?(" · next "+r.next.slice(5,10).replace("-","/")+" (in "+r.in_h+"h)"):"";
+    const mk=(f,vals,cur,lab)=>'<select data-n="'+i+'" data-f="'+f+'" aria-label="'+lab+' for '+esc(r.name)+'">'+vals.map(o=>'<option value="'+o+'"'+(o===cur?" selected":"")+'>'+(lab==="join"?(o+"m"):(o?("+"+o+"m"):"off"))+'</option>').join("")+'</select>';
+    const ctl='<div class="congCtl"><label class="sw"><input type="checkbox" data-n="'+i+'" data-f="aj"'+(r.auto_join?" checked":"")+(r.weekly?"":" disabled")+' aria-label="Auto-join for '+esc(r.name)+'"><i></i></label>'+
+      mk("ld",[5,10,15,20,30,60],(r.join_lead_min||15),"join")+
+      '<span class="clab">before start</span>'+
+      mk("lo",[0,30,45,60,75,90,120],r.auto_logout_min,"sign out")+
+      '<span class="clab">after start</span></div>';
     return '<div class="congItem'+(live?" live":"")+'">'+
-      '<div class="congTop"><b>'+esc(r.name)+'</b>'+(live?'<span class="clive">\u25cf live</span>':'')+'</div>'+
-      '<div class="congSub">'+when+nxt+'</div>'+
-      '<div class="congCtl"><label class="sw"><input type="checkbox" data-n="'+i+'" data-f="aj"'+(r.auto_join?" checked":"")+(r.weekly?"":" disabled")+' aria-label="Auto-join for '+esc(r.name)+'"><i></i></label>'+
-      '<span class="clab">Auto-join</span>'+sel+'<span class="clab">Auto sign-out</span></div>'+
-      '<div class="congMeta">'+esc(r.email)+(r.confno?(" \u00b7 #"+esc(r.confno)):"")+(r.scene?(" \u00b7 "+esc(r.scene)):"")+'</div>'+
+      '<div class="congTop"><b>'+esc(r.name)+'</b>'+(live?'<span class="clive">● live</span>':'')+'</div>'+
+      '<div class="congSub">'+when+nxt+'</div>'+ctl+
+      '<div class="congMeta">'+esc(r.email)+(r.confno?(" · #"+esc(r.confno)):"")+(r.scene?(" · "+esc(r.scene)):"")+'</div>'+
     '</div>';
   }).join("");
 }
@@ -2716,17 +2733,20 @@ document.getElementById("congList").addEventListener("change",async e=>{
   const r=_CONG_ROWS[+d.n]; if(!r)return;
   const m=document.getElementById("congMsg");
   const body={name:r.name};
-  if(d.f==="aj")body.auto_join=!!t.checked; else body.auto_logout_min=+t.value;
+  if(d.f==="aj")body.auto_join=!!t.checked;
+  else if(d.f==="ld")body.join_lead_min=+t.value;
+  else body.auto_logout_min=+t.value;
   try{
     const res=await api("/api/congregations",body);
     renderCong(res.rows||[],res);
     if(m){
       m.textContent=d.f==="aj"?("Auto-join "+(t.checked?"ON":"OFF")+" for "+r.name)
-                              :("Auto sign-out "+(t.value==="0"?"off":"+"+t.value+" min")+" for "+r.name);
+               :d.f==="ld"?("Auto-join "+t.value+" min before start for "+r.name)
+               :("Auto sign-out "+(t.value==="0"?"off":"+"+t.value+" min")+" for "+r.name);
       setTimeout(()=>{m.textContent=""},5000);
     }
   }catch(err){
-    if(t.type==="checkbox")t.checked=!t.checked;else t.value=String(r.auto_logout_min);
+    if(t.type==="checkbox")t.checked=!t.checked;else t.value=String(d.f==="ld"?(r.join_lead_min||15):r.auto_logout_min);
     if(m)m.textContent="\u26a0 "+err.message;
   }
 });
@@ -2756,7 +2776,7 @@ function refresh(){
       else if(s.svc.active){sl.className="live";sl.textContent="\u25cf Service running"+(s.svc.auto_logout_at?(" \u00b7 Zoom auto-logout "+s.svc.auto_logout_at.slice(11,16)):"");}
       else if(s.next_meeting){
         sl.className="info";
-        const t=new Date(s.next_meeting.at), j=new Date(t.getTime()-900000);
+        const t=new Date(s.next_meeting.at), j=new Date(t.getTime()-((s.next_meeting.lead||15)*60000));
         const hh=x=>String(x.getHours()).padStart(2,"0")+":"+String(x.getMinutes()).padStart(2,"0");
         sl.textContent="Next: "+s.next_meeting.name+" "+hh(t)+" "+(s.next_meeting.auto_join===false?"manual join only":"\u00b7 auto-join "+hh(j));
       }
@@ -2859,12 +2879,7 @@ function netBad(){
     b.classList.remove("hidden");
   }
 }
-setInterval(()=>{
-  const u2=document.getElementById("cAge"); if(!u2)return;
-  if(!lastGood){u2.textContent="";return;}
-  const secs=Math.round((Date.now()-lastGood)/1000);
-  u2.textContent=secs>=5?("last seen "+secs+"s ago"):"connected";
-},1000);
+
 (function(){const el=document.getElementById("presets");
   for(let i=0;i<10;i++){const c=document.createElement("button");c.type="button";c.className="chip";c.textContent=i;
     c.onclick=()=>api("/api/camera/preset",{n:i,save:false}).then(()=>res("camResult",true,"preset "+i)).catch(e=>res("camResult",false,String(e.message||e)));
@@ -3325,6 +3340,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 nxt = _next_start(wk, now)
                 out.append({"id": m["id"], "name": m["name"], "weekly": wk,
+                            "join_lead_min": m.get("join_lead_min", 15),
                             "next_start": nxt.isoformat(timespec="seconds"),
                             "in_minutes": int((nxt - now).total_seconds() // 60)})
             self._json(200, {"now": now.isoformat(timespec="seconds"), "meetings": out,
@@ -3755,8 +3771,9 @@ def _set_autojoin_blocked(block):
     return {"ok": True, "autojoin_blocked": bool(blocked), "flag_date": until or ""}
 
 def scheduler_loop():
-    """Every 30s, check each weekly meeting: inside its T-15min window and not
-    yet handled -> run the full service start for that profile.
+    """Every 30s, check each weekly meeting: inside its auto-join window
+    (join_lead_min minutes before start, default 15) and not yet handled ->
+    run the full service start for that profile.
     Skips if a meeting is already in progress (protects back-to-back Sundays)."""
     global _SVC_ACTIVE
     seen = {}
@@ -3772,7 +3789,8 @@ def scheduler_loop():
                 start = _next_start(wk, now)
                 delta = (start - now).total_seconds()
                 key = "%s|%s" % (m["id"], start.date().isoformat())
-                if 0 <= delta <= 900:
+                lead = m.get("join_lead_min", 15) * 60
+                if 0 <= delta <= lead:
                     if not m.get("auto_join", True):
                         if key not in blocked_logged:
                             blocked_logged[key] = True

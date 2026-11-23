@@ -80,7 +80,9 @@ examples/com.church.dash.plist   launchd agent template (run at boot, keep alive
      (e.g. a stake-level account that must stay signed in).
    - CSV column `auto_join` — set `0` on a row to keep its schedule visible
      but **disable the scheduled auto sign-in/join** for that congregation
-     only (manual Start Service still works). Default is enabled. The timer is
+     only (manual Start Service still works). Default is enabled.
+   - CSV column `join_lead_min` — minutes before start that auto-join fires
+     for that congregation (default 15; range 1-120). The timer is
      armed by Start Service (manual or scheduled) and cancelled by a
      successful Stop Service; it only fires while that congregation is
      still the signed-in Zoom account.
