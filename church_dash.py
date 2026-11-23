@@ -2196,8 +2196,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,
 #statusLine.live{display:block;background:rgba(49,196,141,.10);border-color:rgba(49,196,141,.45)}
 #statusLine.info{display:block;background:var(--card)}
 pre.steps{margin:4px 0;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap}
-.cstat{margin-top:0;font-size:12px;max-width:58%;text-align:right;overflow:hidden}
-.result:empty{margin-top:0}
+.toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1a212c;border:1px solid var(--line);color:var(--fg);padding:10px 16px;border-radius:12px;font-size:13.5px;z-index:90;max-width:92vw;box-shadow:0 6px 24px rgba(0,0,0,.45)}
+.toast.err{border-color:rgba(231,76,60,.65)}
 .congItem{border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:8px;background:#12161d}
 .congItem.live{border-color:rgba(49,196,141,.55)}
 .congTop{display:flex;justify-content:space-between;align-items:center;font-size:15px}
@@ -2297,7 +2297,7 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
 <div id="netBanner" class="hidden" style="background:#3a1715;border:1px solid #6e2a26;color:#ff9d94;border-radius:11px;padding:10px 14px;font-size:14px;font-weight:600;margin-bottom:12px" role="alert">⚠ Connection lost — retrying…</div>
 
 <div class="card">
-  <div class="ctitle"><span>OBS Scenes</span><div class="result cstat" id="obsResult" aria-live="polite"></div></div>
+  <div class="ctitle">OBS Scenes</div>
   <div class="chips" id="scenes"><span class="mut">waiting for OBS…</span></div>
 </div>
 
@@ -2315,7 +2315,7 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
 
 
 <div class="card">
-  <div class="ctitle"><span>Camera Controls</span><div class="result cstat" id="camResult" aria-live="polite"></div></div>
+  <div class="ctitle">Camera Controls</div>
   <div class="padrow">
     <div class="pad">
       <span></span><button class="btn" data-mv="up" aria-label="pan up">▲</button><span></span>
@@ -2364,8 +2364,6 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
     <button class="btn" id="zJoinId" style="flex:0 0 auto;width:auto;padding:11px 14px">🎯 Join ID</button>
   </div>
   <details id="zoomHelp" style="margin-top:8px"><summary class="mut" style="font-size:12px;cursor:pointer">Auto sign-in &amp; Keychain</summary><div class="mut" style="font-size:12px;margin-top:3px">Sign-in runs automatically when Join lands on the sign-in screen. Credentials live in the Mac Keychain.</div></details>
-  <div class="result" id="svcResult" aria-live="polite"></div>
-  <div class="result" id="zoomResult" aria-live="polite"></div>
 </div>
 
 <div class="card hidden" id="congCard">
@@ -2391,6 +2389,8 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
   </div>
 </div>
 </div>
+
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
 <div id="credModal" class="attmodal hidden" role="dialog" aria-modal="true" aria-label="Set Zoom credentials" onclick="if(event.target===this)this.classList.add('hidden')">
   <div class="attbox">
@@ -2450,7 +2450,18 @@ async function showAttendees(){
     b.innerHTML="<div class='err'>"+esc(e.message||String(e))+"</div><div class='mut' style='margin-top:8px'>Make sure the meeting is active in this account's Zoom client, then try again.</div>";
   }
 }
-function res(id,ok,txt){const e=document.getElementById(id);if(!e)return;e.innerHTML=(ok?"✔ ":"✘ ")+(txt||"").replace(/</g,"&lt;");e.classList.toggle("err",!ok);}
+function res(id,ok,txt){
+  const e=document.getElementById(id);
+  // credResult lives inside the modal DOM; detached stubs/gone elements -> toast
+  if(e&&document.body.contains(e)){e.innerHTML=(ok?"✔ ":"✘ ")+(txt||"").replace(/</g,"&lt;");e.classList.toggle("err",!ok);return;}
+  toast((ok?"✔ ":"✘ ")+(txt||""),ok?"":"err");
+}
+function toast(msg,kind){
+  const t=document.getElementById("toast"); if(!t)return;
+  t.textContent=msg; t.classList.remove("hidden");
+  t.classList.toggle("err",kind==="err");
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.add("hidden"),kind==="err"?6000:3500);
+}
 async function act(id,fn,rid,busy){
   const b=document.getElementById(id);b.disabled=true;window._actBusy=id;
   const orig=b.innerHTML;
@@ -2459,10 +2470,11 @@ async function act(id,fn,rid,busy){
   const tick=async()=>{try{
     const o=await api("/api/operation");
     if(rid&&o&&o.op&&!o.done&&o.step){const e=document.getElementById(rid);
-      if(e){const L=(o.steps||[]).slice(-10);
+      if(e&&document.body.contains(e)){const L=(o.steps||[]).slice(-10);
         e.innerHTML='<span class="mut">\u23f3 '+String(o.step).replace(/</g,"&lt;")+'</span>'
           +(L.length>1?'<pre class="steps">'+L.slice(0,-1).map(x=>String(x).replace(/</g,"&lt;")).join("\\n")+'</pre>':'');
-        e.classList.remove("err");}}
+        e.classList.remove("err");}
+      else{toast("\u23f3 "+String(o.step));}}
   }catch(x){}};
   if(rid){tick();poll=setInterval(tick,900);}
   try{const d=await fn();return d;}catch(e){if(rid)res(rid,false,String(e.message||e));throw e;}
