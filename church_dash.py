@@ -2245,10 +2245,13 @@ label.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var
 .chip{border:1px solid var(--line);background:#1d2430;border-radius:999px;padding:9px 15px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--fg)}
 .chip.cur{background:#1c3a66;border-color:#2f5da8;color:#cfe1ff}
 .chip:active{transform:scale(.96)}
-.padrow{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:10px}
+.padrow{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:10px;flex-wrap:wrap}
 .pad{display:grid;grid-template-columns:repeat(3,64px);grid-auto-rows:52px;gap:8px}
 .pad .btn{width:64px;height:52px;margin:0;font-size:20px;padding:0}
-.zoomcol{display:flex;flex-direction:column;gap:8px}
+.zoomcol{display:flex;gap:10px;align-items:center}
+.zoomcol .zoombtns{display:flex;flex-direction:column;gap:8px}
+.spdwrap{display:flex;flex-direction:column;align-items:center;gap:4px}
+.vrange{writing-mode:vertical-lr;direction:rtl;height:96px;width:36px;accent-color:var(--acc);margin:0}
 .zoomcol .btn{width:52px;height:52px;margin:0;font-size:18px;padding:0}
 .presetbox{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
 .presetbox summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--mut);padding:4px 2px}
@@ -2324,16 +2327,18 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
       <span></span><button class="btn" data-mv="down" aria-label="pan down">▼</button><span></span>
     </div>
     <div class="zoomcol">
-      <button class="btn" data-mv="zoomin" aria-label="zoom in">＋</button>
-      <button class="btn" data-mv="zoomout" aria-label="zoom out">－</button>
+      <div class="spdwrap">
+        <span id="ptzMaxV" class="mut" style="font-size:11px">50%</span>
+        <input id="ptzMax" class="vrange" type="range" min="10" max="100" step="10" value="50" aria-label="Max speed">
+        <span class="mut" style="font-size:9px;letter-spacing:.08em">SPD</span>
+      </div>
+      <div class="zoombtns">
+        <button class="btn" data-mv="zoomin" aria-label="zoom in">＋</button>
+        <button class="btn" data-mv="zoomout" aria-label="zoom out">－</button>
+      </div>
     </div>
   </div>
   <div class="mut" style="font-size:11.5px;margin-top:4px">Tap = fine \u00b7 hold ramps up \u00b7 release = stop</div>
-  <div class="row" style="align-items:center;gap:10px;margin-top:8px">
-    <label class="lbl" style="margin:0;white-space:nowrap">Max speed</label>
-    <input id="ptzMax" type="range" min="10" max="100" step="5" value="50" style="flex:1;accent-color:var(--acc)">
-    <span id="ptzMaxV" class="mut" style="font-size:12px;min-width:34px;text-align:right">50%</span>
-  </div>
   <details class="presetbox" id="presetBox" style="display:none">
     <summary>Presets</summary>
     <label class="lbl">Presets (recall)</label>
@@ -2555,17 +2560,14 @@ document.querySelectorAll("[data-mv]").forEach(b=>{
   const pmax=()=>Math.max(10,Math.min(100,parseInt(localStorage.getItem("ptzmax")||"50",10)||50));
   b.addEventListener("pointerdown",e=>{e.preventDefault();
     moving=true;
-    res("camResult",true,"moving "+mv+" (fine)");
     api("/api/camera/move",{action:mv}).catch(e2=>res("camResult",false,String(e2.message||e2)));
     const mx=pmax();
     ramp1=setTimeout(()=>{
       if(!moving)return;
-      res("camResult",true,"moving "+mv+" (medium \u00b7 "+Math.max(5,Math.round(mx/2))+"%)");
       api("/api/camera/move",{action:mv,speed:Math.max(5,Math.round(mx/2))}).catch(()=>{});
     },400);
     ramp2=setTimeout(()=>{
       if(!moving)return;
-      res("camResult",true,"moving "+mv+" (fast \u00b7 "+mx+"%)");
       api("/api/camera/move",{action:mv,speed:mx}).catch(()=>{});
     },1000);
     hardT=setTimeout(()=>{
@@ -2582,7 +2584,7 @@ document.querySelectorAll("[data-mv]").forEach(b=>{
 (function(){
   const sl=document.getElementById("ptzMax"),v=document.getElementById("ptzMaxV");
   if(!sl)return;
-  const cur=Math.max(10,Math.min(100,parseInt(localStorage.getItem("ptzmax")||"50",10)||50));
+  const cur=Math.round(Math.max(10,Math.min(100,parseInt(localStorage.getItem("ptzmax")||"50",10)||50))/10)*10;
   sl.value=cur;v.textContent=cur+"%";
   sl.addEventListener("input",()=>{v.textContent=sl.value+"%";localStorage.setItem("ptzmax",sl.value);});
 })();
