@@ -2327,14 +2327,14 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
       <span></span><button class="btn" data-mv="down" aria-label="pan down">▼</button><span></span>
     </div>
     <div class="zoomcol">
+      <div class="zoombtns">
+        <button class="btn" data-mv="zoomin" aria-label="zoom in">＋</button>
+        <button class="btn" data-mv="zoomout" aria-label="zoom out">－</button>
+      </div>
       <div class="spdwrap">
         <span id="ptzMaxV" class="mut" style="font-size:11px">50%</span>
         <input id="ptzMax" class="vrange" type="range" min="10" max="100" step="10" value="50" aria-label="Max speed">
         <span class="mut" style="font-size:9px;letter-spacing:.08em">SPD</span>
-      </div>
-      <div class="zoombtns">
-        <button class="btn" data-mv="zoomin" aria-label="zoom in">＋</button>
-        <button class="btn" data-mv="zoomout" aria-label="zoom out">－</button>
       </div>
     </div>
   </div>
