@@ -2252,6 +2252,14 @@ label.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var
 .zoomcol .zoombtns{display:flex;flex-direction:column;gap:8px}
 .spdwrap{display:flex;flex-direction:column;align-items:center;gap:4px}
 .vrange{writing-mode:vertical-lr;direction:rtl;height:110px;width:38px;accent-color:var(--acc);margin:0}
+@media (max-width:430px){
+.pad{grid-template-columns:repeat(3,60px);grid-auto-rows:54px;gap:6px}
+.pad .btn{width:60px;height:54px;font-size:20px}
+.padrow{gap:8px}
+.zoomcol{gap:8px}
+.zoomcol .btn{width:54px;height:54px;font-size:18px}
+.vrange{height:96px;width:34px}
+}
 .zoomcol .btn{width:60px;height:60px;margin:0;font-size:20px;padding:0}
 .pad .btn.sp1,.zoomcol .btn.sp1{background:#22344a;border-color:var(--acc)}
 .pad .btn.sp2,.zoomcol .btn.sp2{background:#2b4a6b;border-color:var(--acc);box-shadow:0 0 8px rgba(79,140,255,.35)}
