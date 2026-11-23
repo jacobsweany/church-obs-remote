@@ -2253,6 +2253,9 @@ label.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var
 .spdwrap{display:flex;flex-direction:column;align-items:center;gap:4px}
 .vrange{writing-mode:vertical-lr;direction:rtl;height:96px;width:36px;accent-color:var(--acc);margin:0}
 .zoomcol .btn{width:52px;height:52px;margin:0;font-size:18px;padding:0}
+.pad .btn.sp1,.zoomcol .btn.sp1{background:#22344a;border-color:var(--acc)}
+.pad .btn.sp2,.zoomcol .btn.sp2{background:#2b4a6b;border-color:var(--acc);box-shadow:0 0 8px rgba(79,140,255,.35)}
+.pad .btn.sp3,.zoomcol .btn.sp3{background:var(--acc);border-color:var(--acc);color:#fff;box-shadow:0 0 14px rgba(79,140,255,.55)}
 .presetbox{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
 .presetbox summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--mut);padding:4px 2px}
 .stream{width:100%;border-radius:10px;border:1px solid var(--line);background:#000;margin-top:4px;min-height:90px}
@@ -2550,24 +2553,28 @@ document.querySelectorAll("[data-mv]").forEach(b=>{
     return;
   }
   let ramp1=null, ramp2=null, hardT=null, moving=false;
+  const setSp=(n)=>{b.classList.remove("sp1","sp2","sp3");if(n)b.classList.add("sp"+n);};
+  const vib=(p)=>{try{if(navigator.vibrate)navigator.vibrate(p);}catch(e){}};
   const stop=()=>{
     if(ramp1){clearTimeout(ramp1);ramp1=null;}
     if(ramp2){clearTimeout(ramp2);ramp2=null;}
     if(hardT){clearTimeout(hardT);hardT=null;}
-    moving=false;
+    moving=false;setSp(0);
     api("/api/camera/move",{action:stopFor}).catch(()=>{});
   };
   const pmax=()=>Math.max(10,Math.min(100,parseInt(localStorage.getItem("ptzmax")||"50",10)||50));
   b.addEventListener("pointerdown",e=>{e.preventDefault();
-    moving=true;
-    api("/api/camera/move",{action:mv}).catch(e2=>res("camResult",false,String(e2.message||e2)));
+    moving=true;setSp(1);vib(10);
+    api("/api/camera/move",{action:mv}).catch(e2=>{setSp(0);res("camResult",false,String(e2.message||e2))});
     const mx=pmax();
     ramp1=setTimeout(()=>{
       if(!moving)return;
+      setSp(2);vib(20);
       api("/api/camera/move",{action:mv,speed:Math.max(5,Math.round(mx/2))}).catch(()=>{});
     },400);
     ramp2=setTimeout(()=>{
       if(!moving)return;
+      setSp(3);vib([25,30,25]);
       api("/api/camera/move",{action:mv,speed:mx}).catch(()=>{});
     },1000);
     hardT=setTimeout(()=>{
