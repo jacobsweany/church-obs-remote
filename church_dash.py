@@ -304,6 +304,7 @@ def _slug(name):
 _DOW = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5,
         "sun": 6, "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
         "friday": 4, "saturday": 5, "sunday": 6}
+_DOWNAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 def _parse_dow(v):
     s = str(v or "sun").strip().lower()
@@ -2092,6 +2093,18 @@ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,
 #statusLine.live{display:block;background:rgba(49,196,141,.10);border-color:rgba(49,196,141,.45)}
 #statusLine.info{display:block;background:var(--card)}
 pre.steps{margin:4px 0;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap}
+.connLine{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mut);margin-bottom:10px}
+.congItem{border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:8px;background:#12161d}
+.congItem.live{border-color:rgba(49,196,141,.55)}
+.congTop{display:flex;justify-content:space-between;align-items:center;font-size:15px}
+.clive{color:var(--ok);font-size:12px;font-weight:600}
+.congSub{color:var(--mut);font-size:12.5px;margin-top:2px}
+.congPills{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.cpill{font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut);background:#0b0e13}
+.cpill.ok{color:var(--ok);border-color:rgba(49,196,141,.4)}
+.cpill.off2{color:var(--warn);border-color:rgba(242,181,68,.45)}
+.congMeta{color:var(--mut);font:11.5px/1.5 ui-monospace,Menlo,monospace;margin-top:6px;word-break:break-all}
+body.cardMode .dots,body.cardMode #updAge{display:none}
 .wrap{max-width:560px;margin:0 auto}
 h1{font-size:19px;margin:6px 2px 12px;display:flex;align-items:center;gap:10px}
 h1 .dots{margin-left:auto;display:flex;gap:6px;font-size:12px;color:var(--mut);align-items:center}
@@ -2223,11 +2236,6 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
   <div class="mut" id="svcMsg">One-tap sequence: OBS up → Zoom joined (auto sign-in) → camera to start position.</div>
   <div id="profPick" style="display:none;margin-bottom:6px"><label class="lbl">Active congregation (admin)</label><div class="chips" id="profChips" style="margin-top:6px"></div></div>
   <div class="mut" id="schedLine" style="margin-bottom:8px;font-size:12px"></div>
-  <div id="schedToggle" style="display:none">
-    <button class="btn" id="schedToggleBtn" type="button" style="margin-top:0">…</button>
-    <div class="mut" id="schedLo" style="font-size:11.5px;margin-top:4px"></div>
-    <div class="mut" style="font-size:11.5px;margin-top:5px">Halting stops the scheduled auto sign-in/join until midnight (or until you resume). Manual Join is unaffected.</div>
-  </div>
   <div class="row">
     <button class="btn big green" id="svcStart">▶ Start Service</button>
     <button class="btn big red" id="svcStop">■ Stop Service</button>
@@ -2253,6 +2261,20 @@ body.ro .wrap > *:not(#roWrap):not(#gate):not(#netBanner){display:none!important
   </div>
   <div class="mut" id="zoomHelp" style="margin-top:8px">Sign-in runs automatically when Join lands on the sign-in screen. Credentials live in the Mac Keychain.</div>
   <div class="result" id="zoomResult" aria-live="polite"></div>
+</div>
+
+<div class="card hidden" id="congCard">
+  <div style="font-size:17px;font-weight:700;margin-bottom:8px">Congregations &amp; Schedule</div>
+  <div class="connLine"><span class="dot" id="cObs"></span><span>OBS</span>
+    <span class="dot" id="cCam"></span><span>Cam</span>
+    <span class="dot" id="cZoom"></span><span>Zoom</span>
+    <span id="cAge" class="mut"></span></div>
+  <div id="schedToggle" style="display:none;margin-bottom:4px">
+    <button class="btn" id="schedToggleBtn" type="button" style="margin-top:0">…</button>
+    <div class="mut" id="schedLo" style="font-size:11.5px;margin-top:4px"></div>
+    <div class="mut" style="font-size:11.5px;margin-top:5px">Halting stops the scheduled auto sign-in/join for every profile until midnight (or until you resume). Manual Join is unaffected.</div>
+  </div>
+  <div id="congList"></div>
 </div>
 
 <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
@@ -2570,11 +2592,48 @@ document.getElementById("roSignout").onclick=()=>{try{localStorage.removeItem("c
   render();
   setInterval(render,10000);
 })();
+let IS_ADMIN=false;
+function renderCong(rows,meta){
+  const box=document.getElementById("congList"); if(!box)return;
+  const esc=x=>String(x==null?"":x).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  box.innerHTML=rows.map(r=>{
+    const live=meta.svc_active&&meta.acct===r.name;
+    let pills="";
+    if(!r.weekly)pills+='<span class="cpill">ad-hoc meeting</span>';
+    else pills+='<span class="cpill '+(r.auto_join?"ok":"off2")+'">'+(r.auto_join?"auto-join on":"auto-join OFF")+'</span>';
+    pills+='<span class="cpill'+(r.auto_logout_min?"":" off2")+'">'+(r.auto_logout_min?("auto sign-out +"+r.auto_logout_min+" min"):"stays signed in")+'</span>';
+    const when=r.weekly?esc(r.dow+" "+r.time):"no weekly slot";
+    const nxt=(r.weekly&&r.next)?(" \u00b7 next "+r.next.slice(5,10).replace("-","/")+" (in "+r.in_h+"h)"):"";
+    return '<div class="congItem'+(live?" live":"")+'">'+
+      '<div class="congTop"><b>'+esc(r.name)+'</b>'+(live?'<span class="clive">\u25cf live</span>':'')+'</div>'+
+      '<div class="congSub">'+when+nxt+'</div>'+
+      '<div class="congPills">'+pills+'</div>'+
+      '<div class="congMeta">'+esc(r.email)+(r.confno?(" \u00b7 #"+esc(r.confno)):"")+(r.scene?(" \u00b7 "+esc(r.scene)):"")+'</div>'+
+    '</div>';
+  }).join("");
+}
+async function pollCong(){
+  if(!IS_ADMIN)return;
+  try{const d=await api("/api/congregations");renderCong(d.rows||[],d);}catch(e){}
+}
+setInterval(pollCong,10000);
 function refresh(){
   api("/api/state").then(s=>{
     if(s.zoom_ro){renderRO(s);return;}
     document.body.classList.remove("ro");
     document.getElementById("roWrap").classList.add("hidden");
+    IS_ADMIN=!!s.is_admin;
+    const cc=document.getElementById("congCard");
+    if(cc){
+      if(s.is_admin){cc.classList.remove("hidden");document.body.classList.add("cardMode");}
+      else{cc.classList.add("hidden");document.body.classList.remove("cardMode");}
+    }
+    const cO=document.getElementById("cObs"),cC=document.getElementById("cCam"),cZ=document.getElementById("cZoom");
+    if(cO&&cC&&cZ){
+      cO.className="dot "+(s.obs.connected?"on":"off");
+      cC.className="dot "+(s.camera.reachable?"on":"off");
+      cZ.className="dot "+(s.zoom.running?"on":"off");
+    }
     const sn=document.getElementById("scopeName");
     sn.textContent=s.profile_name?s.profile_name:(s.is_admin?"(admin)":"");
     const dO=document.getElementById("dObs"),dC=document.getElementById("dCam"),dZ=document.getElementById("dZoom");
@@ -2690,10 +2749,11 @@ function netBad(){
   }
 }
 setInterval(()=>{
-  const u=document.getElementById("updAge");if(!u)return;
-  if(!lastGood){u.textContent="";return;}
-  const secs=Math.round((Date.now()-lastGood)/1000);
-  u.textContent=secs>=5?("stale "+secs+"s"):"";
+  const u=document.getElementById("updAge"),u2=document.getElementById("cAge");
+  const ok=!!lastGood;
+  const secs=ok?Math.round((Date.now()-lastGood)/1000):0;
+  if(u)u.textContent=(ok&&secs>=5)?("stale "+secs+"s"):"";
+  if(u2)u2.textContent=ok?(secs>=5?("last seen "+secs+"s ago"):"connected"):"";
 },1000);
 (function(){const el=document.getElementById("presets");
   for(let i=0;i<10;i++){const c=document.createElement("button");c.type="button";c.className="chip";c.textContent=i;
@@ -3177,6 +3237,41 @@ class Handler(BaseHTTPRequestHandler):
                 prof = sess["name"]
             self._json(200, {"autojoin_blocked": bool(blocked), "flag_date": until or "",
                              "auto_logout_at": nxt, "auto_logout_profile": prof})
+            return
+        if path == "/api/congregations":
+            if not self._is_admin():
+                self._json(403, {"error": "admin scope required"})
+                return
+            now = datetime.now()
+            rows = []
+            for m in _meetings():
+                wk = m.get("weekly")
+                nxt = None
+                if wk:
+                    try:
+                        nxt = _next_start(wk, now)
+                    except Exception:
+                        nxt = None
+                try:
+                    alm = int(str(m.get("auto_logout_min") or "").strip())
+                except ValueError:
+                    alm = None
+                if alm is None:
+                    try:
+                        alm = int(CFG.get("auto_logout_min", 75))
+                    except Exception:
+                        alm = 75
+                rows.append({"name": m.get("name") or "", "email": m.get("email") or "",
+                             "confno": m.get("confno") or "", "scene": m.get("scene") or "",
+                             "weekly": bool(wk),
+                             "dow": _DOWNAMES[wk["dow"]] if wk else "",
+                             "time": wk["time"] if wk else "",
+                             "auto_join": bool(m.get("auto_join", True)),
+                             "auto_logout_min": alm,
+                             "next": nxt.isoformat(timespec="minutes") if nxt else "",
+                             "in_h": int((nxt - now).total_seconds() // 3600) if nxt else None})
+            self._json(200, {"rows": rows, "svc_active": bool(_SVC_ACTIVE),
+                             "acct": _LAST_ZOOM_ACCOUNT or ""})
             return
         if path == "/api/state":
             if self._is_zoom_ro():
